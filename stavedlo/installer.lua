@@ -54,6 +54,10 @@ local shell = require("shell")
 
 local overwriteAll = false
 
+if not filesystem.exists(installRoot) then
+    filesystem.makeDirectory(installRoot)
+end
+
 local function ensureDir(path)
     local dir = path:match("^(.*)/[^/]+$")
     if dir and dir ~= "" and not filesystem.exists(installRoot .. dir) then

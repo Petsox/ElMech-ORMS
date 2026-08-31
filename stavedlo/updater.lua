@@ -14,6 +14,10 @@ local repo = "https://raw.githubusercontent.com/" .. repoOwner .. "/" .. repoNam
 local installRoot = "/home/stavedlo/"
 local manifestPath = installRoot .. "data/update_manifest.json"
 
+if not fs.exists(installRoot) then
+    fs.makeDirectory(installRoot)
+end
+
 local files = {
     {src = "common/json.lua", dest = "json.lua"},
     {src = "common/persist.lua", dest = "persist.lua"},
