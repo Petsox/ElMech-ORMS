@@ -44,5 +44,8 @@ Po instalaci na **obou** počítačích:
 
 ## Aktualizace
 
-`updater.lua` na obou strojích porovná git SHA souborů v repu a stáhne jen to, co se změnilo
-(mapování a routes.json zůstávají zachované).
+`installer.lua` stáhne i `updater.lua` (do `/home/stavedlo/updater.lua`, resp. `/home/dk/updater.lua`) --
+nic navíc není potřeba spouštět zvlášť po instalaci. Kdykoliv později budeš chtít aktualizovat na
+nejnovější verzi z repa, spusť `/home/stavedlo/updater.lua` (resp. `/home/dk/updater.lua`) -- porovná
+git SHA souborů v repu a stáhne jen to, co se změnilo (mapování a routes.json zůstávají zachované),
+včetně sebe sama.

@@ -47,6 +47,7 @@ local files = {
     {src = "stavedlo/interlocking/signals.lua", dest = "interlocking/signals.lua"},
     {src = "stavedlo/setup.lua", dest = "setup.lua"},
     {src = "stavedlo/init.lua", dest = "init.lua"},
+    {src = "stavedlo/updater.lua", dest = "updater.lua"},
 }
 
 print("Are you sure you want to update Stavědlo?\nThis will NOT delete your component mapping or routes. (Y - Continue/N - Cancel)")

@@ -38,6 +38,7 @@ local files = {
     {src = "dk/interlocking/routeselect.lua", dest = "interlocking/routeselect.lua"},
     {src = "dk/setup.lua", dest = "setup.lua"},
     {src = "dk/init.lua", dest = "init.lua"},
+    {src = "dk/updater.lua", dest = "updater.lua"},
 }
 
 print("Are you sure you want to update DK?\nThis will NOT delete your component mapping or routes. (Y - Continue/N - Cancel)")

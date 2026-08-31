@@ -47,6 +47,7 @@ local files = {
     {src = "stavedlo/interlocking/signals.lua", dest = "interlocking/signals.lua"},
     {src = "stavedlo/setup.lua", dest = "setup.lua"},
     {src = "stavedlo/init.lua", dest = "init.lua"},
+    {src = "stavedlo/updater.lua", dest = "updater.lua"},
 }
 
 local filesystem = require("filesystem")

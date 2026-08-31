@@ -30,6 +30,7 @@ local files = {
     {src = "dk/interlocking/routeselect.lua", dest = "interlocking/routeselect.lua"},
     {src = "dk/setup.lua", dest = "setup.lua"},
     {src = "dk/init.lua", dest = "init.lua"},
+    {src = "dk/updater.lua", dest = "updater.lua"},
 }
 
 local filesystem = require("filesystem")
