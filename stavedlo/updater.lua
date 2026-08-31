@@ -1,4 +1,3 @@
-#!/usr/bin/env lua
 -- Updater for the Stavědlo role. Ported from Open-Rail-Management-System's updater.lua: same
 -- git blob SHA diff against GitHub's recursive tree API, so only files that actually changed
 -- get re-downloaded. Manifest is keyed by the repo (src) path, same as installer.lua's manifest,
@@ -10,7 +9,7 @@ local json = require("json")
 
 local repoOwner = "Petsox"
 local repoName = "ElMech-ORMS"
-local branch = "main"
+local branch = "master"
 local repo = "https://raw.githubusercontent.com/" .. repoOwner .. "/" .. repoName .. "/" .. branch .. "/"
 local installRoot = "/home/stavedlo/"
 local manifestPath = installRoot .. "data/update_manifest.json"

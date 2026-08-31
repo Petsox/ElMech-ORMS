@@ -1,10 +1,9 @@
-#!/usr/bin/env lua
 -- Installer for the Dopravní kancelář role. See stavedlo/installer.lua's doc comment -- same
 -- pattern, different (smaller) manifest since DK never talks to switches/signals/crossings
 -- hardware directly.
 local repoOwner = "Petsox"
 local repoName = "ElMech-ORMS"
-local branch = "main"
+local branch = "master"
 local repo = "https://raw.githubusercontent.com/" .. repoOwner .. "/" .. repoName .. "/" .. branch .. "/"
 
 local installRoot = "/home/dk/"

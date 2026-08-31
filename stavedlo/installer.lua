@@ -1,4 +1,3 @@
-#!/usr/bin/env lua
 -- Installer for the Stavědlo role. Adapted from Open-Rail-Management-System's installer.lua
 -- (github.com/Petsox/Open-Rail-Management-System, automatic-route-building branch) -- same
 -- wget-loop-with-overwrite-prompt approach, generalised so a repo source path can land at a
@@ -11,7 +10,7 @@
 -- was explicitly left to the user, not done automatically here).
 local repoOwner = "Petsox"
 local repoName = "ElMech-ORMS"
-local branch = "main"
+local branch = "master"
 local repo = "https://raw.githubusercontent.com/" .. repoOwner .. "/" .. repoName .. "/" .. branch .. "/"
 
 local installRoot = "/home/stavedlo/"

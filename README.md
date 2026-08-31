@@ -20,16 +20,17 @@ Na obě OpenComputers počítače (potřebují redstone I/O, síťovou/linked ka
 
 **Stavědlo:**
 ```
-wget -f https://raw.githubusercontent.com/Petsox/ElMech-ORMS/main/stavedlo/installer.lua /tmp/installer.lua && /tmp/installer.lua
+wget -f https://raw.githubusercontent.com/Petsox/ElMech-ORMS/master/stavedlo/installer.lua /tmp/installer.lua && /tmp/installer.lua
 ```
 
 **Dopravní kancelář:**
 ```
-wget -f https://raw.githubusercontent.com/Petsox/ElMech-ORMS/main/dk/installer.lua /tmp/installer.lua && /tmp/installer.lua
+wget -f https://raw.githubusercontent.com/Petsox/ElMech-ORMS/master/dk/installer.lua /tmp/installer.lua && /tmp/installer.lua
 ```
 
-(`repoOwner`/`repoName`/`branch` v `installer.lua`/`updater.lua` jsou zatím placeholder hodnoty --
-uprav je, až repozitář skutečně vznikne na GitHubu.)
+`repoOwner`/`repoName`/`branch` v `installer.lua`/`updater.lua` počítají s repozitářem
+`Petsox/ElMech-ORMS` na branchi `master` -- pokud repo vznikne jinde nebo pod jiným jménem, uprav
+tyto konstanty na začátku obou souborů.
 
 Po instalaci na **obou** počítačích:
 

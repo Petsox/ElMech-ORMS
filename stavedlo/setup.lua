@@ -1,4 +1,3 @@
-#!/usr/bin/env lua
 -- One-time (re-runnable) setup wizard for the Stavědlo computer: walks the layout, lets the
 -- user manually wire every switch/signal/crossing/gate/lock-clonka to an OpenComputers component
 -- address, confirms signal classification, computes routes.json (route enumeration + závěr

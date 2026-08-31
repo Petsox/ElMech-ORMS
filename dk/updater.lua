@@ -1,4 +1,3 @@
-#!/usr/bin/env lua
 -- Updater for the Dopravní kancelář role. See stavedlo/updater.lua's doc comment -- identical
 -- mechanism, DK's (smaller) manifest.
 local shell = require("shell")
@@ -8,7 +7,7 @@ local json = require("json")
 
 local repoOwner = "Petsox"
 local repoName = "ElMech-ORMS"
-local branch = "main"
+local branch = "master"
 local repo = "https://raw.githubusercontent.com/" .. repoOwner .. "/" .. repoName .. "/" .. branch .. "/"
 local installRoot = "/home/dk/"
 local manifestPath = installRoot .. "data/update_manifest.json"

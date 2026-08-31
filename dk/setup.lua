@@ -1,4 +1,3 @@
-#!/usr/bin/env lua
 -- Setup wizard for the Dopravní kancelář computer. DK never touches switches/signals/crossings
 -- directly (that's all stavedlo/setup.lua), so this only needs: the same signal classification
 -- pass as stavedlo (to compute the identical routes.json locally -- see the note in the design
