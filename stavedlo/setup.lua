@@ -76,6 +76,61 @@ local function rootLeverOwner(map, code)
     return code
 end
 
+local function findSwitchConfig(config, code)
+    for _, s in ipairs(config.Switches or {}) do
+        if s[5] == code then
+            return s
+        end
+    end
+    return nil
+end
+
+local function promptSwitchLever()
+    local rioAddress = pickComponent(componentmap.TYPES.redstone, "Redstone I/O pro páčku/světlo")
+    if not rioAddress then
+        return nil
+    end
+    local side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
+    local color = cli.pick(switchio.COLOR_NAMES, function(n) return n end)
+    return rioAddress, side, color
+end
+
+local function promptSwitchDrive(code)
+    local controller = pickComponent(componentmap.TYPES.universalController, "digitalUnivController pro pohon výhybky")
+    local receiverName = cli.prompt("Jméno Universal Receiveru (v SignalCraft) pro výhybku " .. code)
+    return controller, receiverName
+end
+
+-- Called when a "spojená výhybka" names a target that isn't mapped yet. Rather than force the
+-- user to abort and re-run the wizard in the right order, offers to map the target right here as
+-- a lever owner (its own redstoneIO/side/color + controller/receiverName). Returns true once
+-- map.switches[code] exists (already did, or was just filled in), false if the user declined or
+-- skipped -- caller should leave the referencing switch unmapped in that case.
+local function setupOwnerInline(config, map, code)
+    if map.switches[code] then
+        return true
+    end
+    local s = findSwitchConfig(config, code)
+    local label = s and (" (" .. s[1] .. "," .. s[2] .. ")") or ""
+    io.write("Výhybka '" .. code .. "' zatím není namapovaná.\n")
+    if not cli.confirm("Namapovat ji teď jako vlastníka páčky?", true) then
+        return false
+    end
+
+    io.write("\n--- Výhybka " .. code .. label .. " (vlastník páčky) ---\n")
+    local rioAddress, side, color = promptSwitchLever()
+    if not rioAddress then
+        io.write("Přeskočeno -- výhybka '" .. code .. "' zůstane nenamapovaná.\n")
+        return false
+    end
+    local controller, receiverName = promptSwitchDrive(code)
+    map.switches[code] = {
+        redstoneIO = rioAddress, side = side, color = color,
+        controller = controller, receiverName = receiverName,
+    }
+    return true
+end
+
 local function setupSwitches(config, map)
     cli.header("Výhybky")
     for _, s in ipairs(config.Switches or {}) do
@@ -89,24 +144,21 @@ local function setupSwitches(config, map)
         local rioAddress, side, color, leverOwner
         if cli.confirm("Je tato výhybka spojená s jinou (společná páčka)?", false) then
             local otherCode = cli.prompt("Kód výhybky, se kterou sdílí páčku")
-            if not map.switches[otherCode] then
-                io.write("Výhybka '" .. tostring(otherCode) .. "' zatím není namapovaná -- namapuj ji nejdřív samostatně, pak se na ni dá odkázat.\n")
+            if not setupOwnerInline(config, map, otherCode) then
+                io.write("Výhybka '" .. tostring(otherCode) .. "' zůstává nenamapovaná -- výhybka " .. code .. " přeskočena.\n")
                 goto continue
             end
             leverOwner = rootLeverOwner(map, otherCode)
             io.write("Sdílí páčku s výhybkou " .. leverOwner .. ".\n")
         else
-            rioAddress = pickComponent(componentmap.TYPES.redstone, "Redstone I/O pro páčku/světlo")
+            rioAddress, side, color = promptSwitchLever()
             if not rioAddress then
                 io.write("Přeskočeno -- výhybka zůstane nenamapovaná.\n")
                 goto continue
             end
-            side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
-            color = cli.pick(switchio.COLOR_NAMES, function(n) return n end)
         end
 
-        local controller = pickComponent(componentmap.TYPES.universalController, "digitalUnivController pro pohon výhybky")
-        local receiverName = cli.prompt("Jméno Universal Receiveru (v SignalCraft) pro výhybku " .. code)
+        local controller, receiverName = promptSwitchDrive(code)
 
         map.switches[code] = {
             redstoneIO = rioAddress, side = side, color = color, leverOwner = leverOwner,
