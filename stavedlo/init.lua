@@ -217,19 +217,24 @@ end
 
 --------------------------------------------------------------------------------
 -- Poll loop: mirrors hardware into the GUI, and applies Control Panel lever movements to the
--- actual switch motors (blocked while the switch is inside a locked/reserved route).
+-- actual switch motors (blocked while the switch is inside a locked/reserved route). Spojené
+-- výhybky (map.switches[code].leverOwner set) share one physical lever -- the lever is only ever
+-- read once per group, off the owner's redstoneIO entry, and the resulting position is applied
+-- to every member's own motor (each still has its own controller/receiverName).
 
 local lastLever = {}
 
 local function pollSwitches()
     for code, entry in pairs(map.switches) do
-        local reading = switchio.readLever(entry)
-        if reading ~= nil then
-            if lastLever[code] == nil or reading ~= lastLever[code] then
+        if not entry.leverOwner then
+            local reading = switchio.readLever(entry)
+            if reading ~= nil and (lastLever[code] == nil or reading ~= lastLever[code]) then
                 if not lock:isSwitchLocked(code) then
-                    switchdrv.setPosition(entry, reading)
+                    for _, memberCode in ipairs(componentmap.leverGroup(map, code)) do
+                        switchdrv.setPosition(map.switches[memberCode], reading)
+                        lastLever[memberCode] = reading
+                    end
                     switchio.setIndicator(entry, reading)
-                    lastLever[code] = reading
                 end
             end
         end

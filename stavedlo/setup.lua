@@ -61,6 +61,21 @@ local function pickAspect(controllerAddress, purpose)
     return tonumber(raw)
 end
 
+-- Follows leverOwner to the switch that actually holds redstoneIO/side/color, in case the user
+-- names an already-linked switch as the target -- keeps componentmap.resolveLeverEntry O(1) at
+-- runtime (never has to chase a chain itself).
+local function rootLeverOwner(map, code)
+    local seen = {}
+    while map.switches[code] and map.switches[code].leverOwner do
+        if seen[code] then
+            return code -- shouldn't happen, but avoid an infinite loop over a corrupt mapping
+        end
+        seen[code] = true
+        code = map.switches[code].leverOwner
+    end
+    return code
+end
+
 local function setupSwitches(config, map)
     cli.header("Výhybky")
     for _, s in ipairs(config.Switches or {}) do
@@ -71,18 +86,30 @@ local function setupSwitches(config, map)
             goto continue
         end
 
-        local rioAddress = pickComponent(componentmap.TYPES.redstone, "Redstone I/O pro páčku/světlo")
-        if not rioAddress then
-            io.write("Přeskočeno -- výhybka zůstane nenamapovaná.\n")
-            goto continue
+        local rioAddress, side, color, leverOwner
+        if cli.confirm("Je tato výhybka spojená s jinou (společná páčka)?", false) then
+            local otherCode = cli.prompt("Kód výhybky, se kterou sdílí páčku")
+            if not map.switches[otherCode] then
+                io.write("Výhybka '" .. tostring(otherCode) .. "' zatím není namapovaná -- namapuj ji nejdřív samostatně, pak se na ni dá odkázat.\n")
+                goto continue
+            end
+            leverOwner = rootLeverOwner(map, otherCode)
+            io.write("Sdílí páčku s výhybkou " .. leverOwner .. ".\n")
+        else
+            rioAddress = pickComponent(componentmap.TYPES.redstone, "Redstone I/O pro páčku/světlo")
+            if not rioAddress then
+                io.write("Přeskočeno -- výhybka zůstane nenamapovaná.\n")
+                goto continue
+            end
+            side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
+            color = cli.pick(switchio.COLOR_NAMES, function(n) return n end)
         end
-        local side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
-        local color = cli.pick(switchio.COLOR_NAMES, function(n) return n end)
+
         local controller = pickComponent(componentmap.TYPES.universalController, "digitalUnivController pro pohon výhybky")
         local receiverName = cli.prompt("Jméno Universal Receiveru (v SignalCraft) pro výhybku " .. code)
 
         map.switches[code] = {
-            redstoneIO = rioAddress, side = side, color = color,
+            redstoneIO = rioAddress, side = side, color = color, leverOwner = leverOwner,
             controller = controller, receiverName = receiverName,
         }
         ::continue::

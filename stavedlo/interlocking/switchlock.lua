@@ -18,6 +18,7 @@ local switchdrv = require("hw.switchdrv")
 local switchio = require("hw.switchio")
 local crossingdrv = require("hw.crossingdrv")
 local lockboxdrv = require("hw.lockboxdrv")
+local componentmap = require("componentmap")
 
 local switchlock = {}
 switchlock.__index = switchlock
@@ -72,12 +73,17 @@ end
 
 -- Whether switchCode is used by any currently reserved/locked route -- the kolejový závěrník
 -- blocking manual relever while true. init.lua's switch-poll loop consults this before ever
--- applying a lever movement to the physical switch motor.
+-- applying a lever movement to the physical switch motor. Also true when a spojená výhybka
+-- sharing this switch's lever is itself locked (see componentmap.leverGroup) -- the lever can't
+-- move independently of that group-mate, so it must be blocked here too even if this exact
+-- switch code isn't named by any active route.
 function switchlock:isSwitchLocked(switchCode)
-    for routeId in pairs(self.slots) do
-        local route = self.routesById[routeId]
-        if route.switches[switchCode] then
-            return true
+    for _, code in ipairs(componentmap.leverGroup(self.map, switchCode)) do
+        for routeId in pairs(self.slots) do
+            local route = self.routesById[routeId]
+            if route.switches[code] then
+                return true
+            end
         end
     end
     return false
@@ -122,7 +128,7 @@ end
 local function leverMatchesRoute(self, route)
     for switchName, requiredIcon in pairs(route.switches) do
         local icons = self.routesData.switchIcons[switchName]
-        local entry = self.map.switches[switchName]
+        local entry = componentmap.resolveLeverEntry(self.map, switchName)
         if not icons or not entry then
             return false, switchName
         end

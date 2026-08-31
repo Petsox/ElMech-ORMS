@@ -11,7 +11,12 @@ local componentmap = {}
 
 function componentmap.empty()
     return {
-        switches = {},   -- [switchCode] = {redstoneIO=addr, side=str, color=str, controller=addr, receiverName=str}
+        switches = {},   -- [switchCode] = {redstoneIO=addr, side=str, color=str, controller=addr, receiverName=str,
+                         --   leverOwner=otherSwitchCode}  -- "spojené výhybky": when set, this switch has no lever
+                         --   of its own (redstoneIO/side/color are nil) and shares the named switch's physical
+                         --   lever/indicator; it still has its own controller/receiverName (own motor). leverOwner
+                         --   always points at a switch that owns its lever directly (setup.lua flattens chains),
+                         --   so resolveLeverEntry below never has to recurse.
         signals = {},     -- [signalName] = {controller=addr, kind="main"|"expect"|"shunting"|"repeater"|"inserted",
                           --   stopState=str, clearStraight=str, clearDiverging=str}  -- last 3 only set for kind=="main"
         crossings = {},    -- [crossingName] = {controller=addr}
@@ -61,6 +66,41 @@ function componentmap.discover(componentType)
         found[#found + 1] = {address = address, type = cType, label = label}
     end
     return found
+end
+
+-- Resolves the switch entry that actually owns the physical lever/indicator for `code`'s
+-- redstoneIO reads/writes -- either its own entry, or (for a spojená výhybka) the entry named
+-- by its leverOwner. Every hw/switchio.lua call for a switch's Control Panel lever/light should
+-- go through this instead of indexing map.switches[code] directly.
+function componentmap.resolveLeverEntry(map, code)
+    local entry = map.switches[code]
+    if not entry then
+        return nil
+    end
+    if entry.leverOwner then
+        return map.switches[entry.leverOwner]
+    end
+    return entry
+end
+
+-- Every switch code that shares a physical lever with `code` (code itself and, transitively via
+-- resolveLeverEntry's owner, every other switch pointing at the same owner) -- used to keep
+-- kolejový závěrník locking in sync across a spojená výhybka: locking one member must lock all of
+-- them, since moving the shared lever would move every motor on it at once.
+function componentmap.leverGroup(map, code)
+    local ownerEntry = componentmap.resolveLeverEntry(map, code)
+    if not ownerEntry then
+        return {code}
+    end
+    local ownerCode = map.switches[code].leverOwner or code
+
+    local group = {ownerCode}
+    for otherCode, entry in pairs(map.switches) do
+        if otherCode ~= ownerCode and entry.leverOwner == ownerCode then
+            group[#group + 1] = otherCode
+        end
+    end
+    return group
 end
 
 componentmap.TYPES = {
