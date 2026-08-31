@@ -18,14 +18,17 @@ local switchio = require("hw.switchio")
 local DATA_DIR = "/home/stavedlo/data"
 local ROUTES_PATH = DATA_DIR .. "/routes.json"
 local MAP_PATH = DATA_DIR .. "/componentmap.json"
+-- Fixed path, must match init.lua's STATION_PATH -- not user-configurable to avoid the two
+-- ever drifting apart. (Named station.lua, not layout.lua, to stay clear of common/layout.lua,
+-- the graph/pathfinding module this project installs to the same directory.)
+local STATION_PATH = "/home/stavedlo/station.lua"
 
 local function loadLayout()
-    local path = cli.prompt("Cesta k souboru layoutu (výstup ORMS Layout Generatoru)", "/home/stavedlo/layout.lua")
-    if not filesystem.exists(path) then
-        io.write("Soubor '" .. path .. "' neexistuje. Vlož tam nejprve vygenerovaný layout.\n")
+    if not filesystem.exists(STATION_PATH) then
+        io.write("Soubor '" .. STATION_PATH .. "' neexistuje. Vlož tam nejprve výstup ORMS Layout Generatoru.\n")
         os.exit(1)
     end
-    local chunk, err = loadfile(path)
+    local chunk, err = loadfile(STATION_PATH)
     if not chunk then
         io.write("Chyba při načítání layoutu: " .. tostring(err) .. "\n")
         os.exit(1)

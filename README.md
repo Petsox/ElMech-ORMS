@@ -34,9 +34,10 @@ tyto konstanty na začátku obou souborů.
 
 Po instalaci na **obou** počítačích:
 
-1. Vlož do `/home/stavedlo/layout.lua` (resp. `/home/dk/layout.lua`) stejný výstup z
+1. Vlož do `/home/stavedlo/station.lua` (resp. `/home/dk/station.lua`) stejný výstup z
    [ORMS Layout Generatoru](https://petsox.github.io/ORMS-Layout-Generator-Web-Edition/) (viz
-   `station.lua` jako příklad).
+   `station.lua` v kořeni tohoto repa jako příklad). Nejmenuje se `layout.lua`, aby se nepletl s
+   `common/layout.lua` -- to je modul projektu (graf tratě + pathfinding), ne vaše data.
 2. Spusť `setup.lua` -- provede tě mapováním hardwaru na jména/adresy z layoutu a spočítá, kolik
    závěrů výměn je pro dané zhlaví potřeba.
 3. Spusť/spouštěj systém příkazem `stavedlo`, resp. `dk`.

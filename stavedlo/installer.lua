@@ -96,5 +96,11 @@ if launcherOk then
     shell.execute("wget -f " .. repo .. "stavedlo/launcher.lua -O /bin/stavedlo.lua")
 end
 
-io.write("\nHotovo. Vlož " .. installRoot .. "layout.lua (výstup ORMS Layout Generatoru), pak spusť " .. installRoot .. "setup.lua.\n")
+io.write("\nHotovo.\n")
+local stationPath = installRoot .. "station.lua"
+if filesystem.exists(stationPath) and filesystem.size(stationPath) > 0 then
+    io.write(stationPath .. " už existuje -- pokud je aktuální, rovnou spusť " .. installRoot .. "setup.lua.\n")
+else
+    io.write("Vlož " .. stationPath .. " (výstup ORMS Layout Generatoru), pak spusť " .. installRoot .. "setup.lua.\n")
+end
 io.write("Program se pak spouští příkazem 'stavedlo'.\n")

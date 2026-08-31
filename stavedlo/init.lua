@@ -30,7 +30,9 @@ local gate = require("interlocking.gate")
 local signalsCtl = require("interlocking.signals")
 
 local DATA_DIR = "/home/stavedlo/data"
-local LAYOUT_PATH = "/home/stavedlo/layout.lua"
+-- Must match setup.lua's STATION_PATH; called station.lua (not layout.lua) to stay clear of
+-- common/layout.lua, the graph/pathfinding module installed alongside it.
+local STATION_PATH = "/home/stavedlo/station.lua"
 local ROUTES_PATH = DATA_DIR .. "/routes.json"
 local MAP_PATH = DATA_DIR .. "/componentmap.json"
 
@@ -41,7 +43,7 @@ end
 
 local map = componentmap.load(MAP_PATH)
 local routesData = routesLib.load(ROUTES_PATH)
-local configChunk, chunkErr = loadfile(LAYOUT_PATH)
+local configChunk, chunkErr = loadfile(STATION_PATH)
 if not configChunk then
     io.write("Chyba při načítání layoutu: " .. tostring(chunkErr) .. "\n")
     os.exit(1)

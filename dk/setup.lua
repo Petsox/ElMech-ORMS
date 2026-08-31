@@ -17,14 +17,16 @@ local lockboxdrv = require("hw.lockboxdrv")
 local DATA_DIR = "/home/dk/data"
 local ROUTES_PATH = DATA_DIR .. "/routes.json"
 local MAP_PATH = DATA_DIR .. "/componentmap.json"
+-- Fixed path, must match init.lua's STATION_PATH -- see stavedlo/setup.lua's note on why this
+-- isn't user-configurable and isn't called layout.lua.
+local STATION_PATH = "/home/dk/station.lua"
 
 local function loadLayout()
-    local path = cli.prompt("Cesta k souboru layoutu (stejný jako na stavědle)", "/home/dk/layout.lua")
-    if not filesystem.exists(path) then
-        io.write("Soubor '" .. path .. "' neexistuje. Vlož tam nejprve vygenerovaný layout.\n")
+    if not filesystem.exists(STATION_PATH) then
+        io.write("Soubor '" .. STATION_PATH .. "' neexistuje. Vlož tam nejprve stejný layout jako na stavědle.\n")
         os.exit(1)
     end
-    local chunk, err = loadfile(path)
+    local chunk, err = loadfile(STATION_PATH)
     if not chunk then
         io.write("Chyba při načítání layoutu: " .. tostring(err) .. "\n")
         os.exit(1)

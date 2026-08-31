@@ -79,5 +79,11 @@ if launcherOk then
     shell.execute("wget -f " .. repo .. "dk/launcher.lua -O /bin/dk.lua")
 end
 
-io.write("\nHotovo. Vlož " .. installRoot .. "layout.lua (stejný jako na stavědle), pak spusť " .. installRoot .. "setup.lua.\n")
+io.write("\nHotovo.\n")
+local stationPath = installRoot .. "station.lua"
+if filesystem.exists(stationPath) and filesystem.size(stationPath) > 0 then
+    io.write(stationPath .. " už existuje -- pokud je aktuální (stejný jako na stavědle), rovnou spusť " .. installRoot .. "setup.lua.\n")
+else
+    io.write("Vlož " .. stationPath .. " (stejný jako na stavědle), pak spusť " .. installRoot .. "setup.lua.\n")
+end
 io.write("Program se pak spouští příkazem 'dk'.\n")
