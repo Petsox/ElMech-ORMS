@@ -5,8 +5,17 @@
 -- graph-computed "maximum concurrent routes" pool -- confirmed by the user against their real
 -- station design: every route sharing a running line (arrival or departure alike) always
 -- conflicts with every other route on that same line in this kind of throat, so a single shared
--- lock per line is what a real electromechanical interlocking actually uses. mainSignalGroups
--- (built by the setup wizard) says which running-line label each hlavní signal belongs to.
+-- lock per line is what a real electromechanical interlocking actually uses.
+--
+-- A route's group is derived PER ROUTE, not fixed per signal -- confirmed against a real layout
+-- where one odjezdové (departure) signal sits at the end of a station track facing back across
+-- the whole switch ladder, so depending on which switches are thrown it can reach ANY of several
+-- different running lines, not just one. So: if a route's destination Label is itself a
+-- T-prefixed running-line label, the group IS that label (the departure route occupies whichever
+-- line the dispatcher actually clicked as its destination). Otherwise (destination is a plain
+-- station-track number) it's an arrival route, always starting from one fixed line, so the group
+-- comes from entranceRunningLine (built by the setup wizard, asked only for signals that
+-- actually need it -- see stavedlo/setup.lua's setupRunningLines).
 local layout = require("layout")
 local persist = require("persist")
 
@@ -88,25 +97,30 @@ local function switchIconTable(config)
     return icons
 end
 
+local function isRunningLineLabel(text)
+    return tostring(text):match("^T%d") ~= nil
+end
+
+-- Whether a route's destination Label is itself a running-line label -- exposed so setup.lua can
+-- run the same check (a signal only needs an entranceRunningLine entry if at least one of its
+-- routes does NOT satisfy this).
+routes.isRunningLineLabel = isRunningLineLabel
+
 -- Computes routes + running-line groups for a zhlaví and persists the result so stavedlo/dk can
--- load it at boot without recomputing. mainSignalGroups = {[entranceName] = runningLineLabel}
--- comes from the setup wizard. A route whose entrance isn't in mainSignalGroups (shouldn't
--- happen -- mainSignalGroups is built from exactly the confirmed hlavní signals) is dropped
--- rather than left ungrouped, since an ungrouped route could never be given a lock slot.
-function routes.computeAndSave(config, mainSignalGroups, path)
+-- load it at boot without recomputing. mainSignalNames: every confirmed hlavní signal (both
+-- arrival and departure alike). entranceRunningLine = {[entranceName] = runningLineLabel}: only
+-- for signals whose routes need a fixed line (see module doc comment) -- built by the setup
+-- wizard. A route that ends up with no group (shouldn't happen for a departure route; for an
+-- arrival route it means entranceRunningLine is missing that signal) is dropped rather than left
+-- ungrouped, since an ungrouped route could never be given a lock slot.
+function routes.computeAndSave(config, mainSignalNames, entranceRunningLine, path)
     local graph = layout.buildGraph(config)
-
-    local mainSignalNames = {}
-    for name in pairs(mainSignalGroups) do
-        mainSignalNames[#mainSignalNames + 1] = name
-    end
-
     local routeList = routes.enumerate(graph, mainSignalNames, config.Labels or {})
 
     local groupSet, groups = {}, {}
     local saved = {switchIcons = switchIconTable(config), routes = {}}
     for _, r in ipairs(routeList) do
-        local group = mainSignalGroups[r.entrance]
+        local group = isRunningLineLabel(r.label) and r.label or entranceRunningLine[r.entrance]
         if group then
             if not groupSet[group] then
                 groupSet[group] = true

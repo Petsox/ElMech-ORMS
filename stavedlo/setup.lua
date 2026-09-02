@@ -356,9 +356,13 @@ local function setupCrossings(config, map)
     end
 end
 
--- Which traťová kolej (running line, e.g. "T1"/"T2"/"T4") each main signal belongs to -- decides
--- routes.lua's lock grouping (one závěr výměn per line, confirmed by the user against their real
--- station design). Offered from the layout's own T-prefixed Labels when present.
+-- Which traťová kolej (running line, e.g. "T1"/"T2"/"T4") a main signal belongs to -- decides
+-- routes.lua's lock grouping for its ARRIVAL routes (one závěr výměn per line, confirmed by the
+-- user against their real station design). Only asked for signals that actually need it: a
+-- signal whose every route ends at a running-line Label (an odjezdové/departure signal facing
+-- back across the whole switch ladder -- confirmed against a real layout where one such signal
+-- can reach several different lines depending on the route) derives its group per-route from
+-- that destination instead (see common/routes.lua), and is never asked here.
 local function setupRunningLines(config, map)
     cli.header("Traťové koleje (skupiny závěrů výměn)")
     local candidates = {}
@@ -368,8 +372,24 @@ local function setupRunningLines(config, map)
         end
     end
 
+    local graph = layout.buildGraph(config)
+    local mainSignalNames = {}
     for name, entry in pairs(map.signals) do
         if entry.kind == "main" then
+            mainSignalNames[#mainSignalNames + 1] = name
+        end
+    end
+    local routeList = routes.enumerate(graph, mainSignalNames, config.Labels or {})
+
+    local needsAssignment = {}
+    for _, r in ipairs(routeList) do
+        if not routes.isRunningLineLabel(r.label) then
+            needsAssignment[r.entrance] = true
+        end
+    end
+
+    for name, entry in pairs(map.signals) do
+        if entry.kind == "main" and needsAssignment[name] then
             io.write("\n--- " .. name .. " ---\n")
             if entry.runningLine and not cli.confirm("Už má traťovou kolej '" .. entry.runningLine .. "', přemapovat?", false) then
                 goto continue
@@ -536,15 +556,18 @@ local function main()
     setupRunningLines(config, map)
     save(map)
 
-    local mainSignalGroups = {}
+    local mainSignalNames, entranceRunningLine = {}, {}
     for name, entry in pairs(map.signals) do
-        if entry.kind == "main" and entry.runningLine then
-            mainSignalGroups[name] = entry.runningLine
+        if entry.kind == "main" then
+            mainSignalNames[#mainSignalNames + 1] = name
+            if entry.runningLine then
+                entranceRunningLine[name] = entry.runningLine
+            end
         end
     end
 
     io.write("\nPočítám možné vlakové cesty...\n")
-    local routesData, err = routes.computeAndSave(config, mainSignalGroups, ROUTES_PATH)
+    local routesData, err = routes.computeAndSave(config, mainSignalNames, entranceRunningLine, ROUTES_PATH)
     if not routesData then
         io.write("Chyba při výpočtu cest: " .. tostring(err) .. "\n")
         os.exit(1)

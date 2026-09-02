@@ -79,6 +79,11 @@ function layout.suggestSignalKind(name)
         return "inserted"
     elseif prefix == "Sc" or prefix == "Lc" then
         return "repeater"
+    elseif name:match("^S%d") then
+        -- Bare "S" + digit (e.g. "S4", not "Se4") -- odjezdové (departure) signal, a hlavní
+        -- signal like any other. Falls into the "main" default below anyway, but made explicit
+        -- since it's easy to misread as related to the "Se" shunting prefix.
+        return "main"
     end
     return "main"
 end

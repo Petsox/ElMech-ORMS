@@ -87,7 +87,9 @@ local function classifySignals(config, map)
 end
 
 -- Must match stavedlo/setup.lua's setupRunningLines exactly, or the two computers compute
--- different routes.json (different groups/lock counts).
+-- different routes.json (different groups/lock counts). Only asked for signals that actually
+-- need it -- see that function's doc comment (a departure signal reaching several different
+-- lines derives its group per-route instead, from its own destination Label).
 local function setupRunningLines(config, map)
     cli.header("Traťové koleje (skupiny závěrů výměn -- stejně jako na stavědle)")
     local candidates = {}
@@ -97,8 +99,24 @@ local function setupRunningLines(config, map)
         end
     end
 
+    local graph = layout.buildGraph(config)
+    local mainSignalNames = {}
     for name, entry in pairs(map.signals) do
         if entry.kind == "main" then
+            mainSignalNames[#mainSignalNames + 1] = name
+        end
+    end
+    local routeList = routes.enumerate(graph, mainSignalNames, config.Labels or {})
+
+    local needsAssignment = {}
+    for _, r in ipairs(routeList) do
+        if not routes.isRunningLineLabel(r.label) then
+            needsAssignment[r.entrance] = true
+        end
+    end
+
+    for name, entry in pairs(map.signals) do
+        if entry.kind == "main" and needsAssignment[name] then
             io.write("\n--- " .. name .. " ---\n")
             if entry.runningLine and not cli.confirm("Už má traťovou kolej '" .. entry.runningLine .. "', přemapovat?", false) then
                 goto continue
@@ -214,15 +232,18 @@ local function main()
     setupRunningLines(config, map)
     save(map)
 
-    local mainSignalGroups = {}
+    local mainSignalNames, entranceRunningLine = {}, {}
     for name, entry in pairs(map.signals) do
-        if entry.kind == "main" and entry.runningLine then
-            mainSignalGroups[name] = entry.runningLine
+        if entry.kind == "main" then
+            mainSignalNames[#mainSignalNames + 1] = name
+            if entry.runningLine then
+                entranceRunningLine[name] = entry.runningLine
+            end
         end
     end
 
     io.write("\nPočítám možné vlakové cesty...\n")
-    local routesData, err = routes.computeAndSave(config, mainSignalGroups, ROUTES_PATH)
+    local routesData, err = routes.computeAndSave(config, mainSignalNames, entranceRunningLine, ROUTES_PATH)
     if not routesData then
         io.write("Chyba při výpočtu cest: " .. tostring(err) .. "\n")
         os.exit(1)
