@@ -106,14 +106,51 @@ local function findSwitchConfig(config, code)
     return nil
 end
 
-local function promptSwitchLever()
-    local rioAddress = pickComponent(componentmap.TYPES.redstone, "Redstone I/O pro páčku/světlo")
+-- Every colour already used on (rioAddress, side) by some OTHER switch/kolejový závěrník --
+-- excludeSwitchCode/excludeRouteId skip the entry currently being (re)configured, so remapping a
+-- switch back onto its own existing colour still works.
+local function usedColorsFor(map, rioAddress, side, excludeSwitchCode, excludeRouteId)
+    local used = {}
+    for code, entry in pairs(map.switches) do
+        if code ~= excludeSwitchCode and entry.redstoneIO == rioAddress and entry.side == side and entry.color then
+            used[entry.color] = true
+        end
+    end
+    for routeId, entry in pairs(map.routeLocks) do
+        if routeId ~= excludeRouteId and entry.redstoneIO == rioAddress and entry.side == side and entry.color then
+            used[entry.color] = true
+        end
+    end
+    return used
+end
+
+-- Shared by switch levers and kolejový závěrník levers -- both are a plain redstoneIO/side/color
+-- Control Panel input, and both draw from the same 16-colour bundled cable per (address, side),
+-- so a colour already claimed by either kind must not be offered again for the other.
+local function promptLever(map, promptText, excludeSwitchCode, excludeRouteId)
+    local rioAddress = pickComponent(componentmap.TYPES.redstone, promptText)
     if not rioAddress then
         return nil
     end
     local side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
-    local color = cli.pick(switchio.COLOR_NAMES, function(n) return n end)
+
+    local used = usedColorsFor(map, rioAddress, side, excludeSwitchCode, excludeRouteId)
+    local available = {}
+    for _, c in ipairs(switchio.COLOR_NAMES) do
+        if not used[c] then
+            available[#available + 1] = c
+        end
+    end
+    if #available == 0 then
+        io.write("Všech 16 barev na " .. rioAddress .. " (" .. side .. ") už je obsazeno -- zvol jinou stranu/adresu.\n")
+        return nil
+    end
+    local color = cli.pick(available, function(n) return n end)
     return rioAddress, side, color
+end
+
+local function promptSwitchLever(map, excludeSwitchCode)
+    return promptLever(map, "Redstone I/O pro páčku/světlo", excludeSwitchCode, nil)
 end
 
 local function promptSwitchDrive(code)
@@ -144,7 +181,7 @@ local function setupOwnerInline(config, map, code)
     end
 
     io.write("\n--- Výhybka " .. code .. label .. " (vlastník páčky) ---\n")
-    local rioAddress, side, color = promptSwitchLever()
+    local rioAddress, side, color = promptSwitchLever(map, code)
     if not rioAddress then
         io.write("Přeskočeno -- výhybka '" .. code .. "' zůstane nenamapovaná.\n")
         return false
@@ -177,7 +214,7 @@ local function setupSwitches(config, map)
             leverOwner = rootLeverOwner(map, otherCode)
             io.write("Sdílí páčku s výhybkou " .. leverOwner .. ".\n")
         else
-            rioAddress, side, color = promptSwitchLever()
+            rioAddress, side, color = promptSwitchLever(map, code)
             if not rioAddress then
                 io.write("Přeskočeno -- výhybka zůstane nenamapovaná.\n")
                 goto continue
@@ -333,13 +370,11 @@ local function setupRouteLocks(routesData, map)
         if map.routeLocks[r.id] and not cli.confirm("Už namapováno, přemapovat?", false) then
             goto continue
         end
-        local rioAddress = pickComponent(componentmap.TYPES.redstone, "Redstone I/O pro páčku kolejového závěrníku")
+        local rioAddress, side, color = promptLever(map, "Redstone I/O pro páčku kolejového závěrníku", nil, r.id)
         if not rioAddress then
             io.write("Přeskočeno -- cesta zůstane bez kolejového závěrníku (nepůjde zamknout závěr výměn).\n")
             goto continue
         end
-        local side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
-        local color = cli.pick(switchio.COLOR_NAMES, function(n) return n end)
         map.routeLocks[r.id] = {redstoneIO = rioAddress, side = side, color = color}
         ::continue::
     end
