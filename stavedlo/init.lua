@@ -294,12 +294,19 @@ local function refreshDiagram()
     end
 end
 
-local eventLib = require("grapes.Event")
-eventLib.addHandler(function()
+-- grapes/GUI.lua's own workspace:start() loop calls OpenComputers' real "event" library's
+-- event.pull() internally (confirmed: GUI.lua's own top-level require is "event", not
+-- "grapes.Event") -- registering a periodic tick through grapes.Event.addHandler instead, as
+-- this used to, is a completely separate handler table that GUI's loop never consults, so it
+-- silently never fires even though touch/network signals keep working fine (those are raw OC
+-- signals GUI's loop does see). event.timer is the built-in library's own equivalent and DOES
+-- integrate with that same loop.
+local event = require("event")
+event.timer(0.5, function()
     pollSwitches()
     refreshDiagram()
     workspace:draw()
-end, 0.5)
+end, math.huge)
 
 workspace:draw()
 workspace:start()

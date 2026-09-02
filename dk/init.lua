@@ -219,8 +219,11 @@ network.install(workspace, map.network.port, onNetworkMessage)
 
 --------------------------------------------------------------------------------
 
-local eventLib = require("grapes.Event")
-eventLib.addHandler(function()
+-- See stavedlo/init.lua's comment: grapes/GUI.lua's own loop uses OpenComputers' built-in
+-- "event" library internally, not grapes.Event, so the periodic tick has to be registered
+-- through event.timer to actually run.
+local event = require("event")
+event.timer(1, function()
     for i, name in ipairs(mainSignalNames) do
         local row = rows[name]
         local pending = rsel:pendingRouteFor(name)
@@ -237,7 +240,7 @@ eventLib.addHandler(function()
         end
     end
     workspace:draw()
-end, 1)
+end, math.huge)
 
 workspace:draw()
 workspace:start()
