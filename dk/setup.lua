@@ -124,17 +124,30 @@ local function setupGateClonky(routesData, map)
             if map.gates[entranceName] and not cli.confirm("Už namapováno, přemapovat?", false) then
                 goto continue
             end
-            local clonkaName = cli.prompt("Jméno clonky hradla (Distant Signal) v DK")
-            local controller = autoOrPickComponent(
-                componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
-                "Digital Controller Box pro clonku hradla " .. entranceName
-            )
-            local normal = pickAspect(controller, "červená / normální", "red")
-            local active = pickAspect(controller, "bílá / aktivní", "white")
-            map.gates[entranceName] = {
-                hradloController = controller, hradloClonkaName = clonkaName,
-                hradloAspects = {normal = normal, active = active},
-            }
+            -- Retry loop: a typo or wrong pick just now can be corrected immediately (choice
+            -- "retry") without restarting the whole wizard -- see cli.reviewChoice's doc comment.
+            while true do
+                local clonkaName = cli.prompt("Jméno clonky hradla (Distant Signal) v DK")
+                local controller = autoOrPickComponent(
+                    componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
+                    "Digital Controller Box pro clonku hradla " .. entranceName
+                )
+                local normal = pickAspect(controller, "červená / normální", "red")
+                local active = pickAspect(controller, "bílá / aktivní", "white")
+
+                local choice = cli.reviewChoice({
+                    "Hradlo " .. entranceName .. ": clonka='" .. tostring(clonkaName) .. "', controller=" .. tostring(controller),
+                })
+                if choice == "save" then
+                    map.gates[entranceName] = {
+                        hradloController = controller, hradloClonkaName = clonkaName,
+                        hradloAspects = {normal = normal, active = active},
+                    }
+                    break
+                elseif choice == "skip" then
+                    break
+                end
+            end
             ::continue::
         end
     end
@@ -154,14 +167,25 @@ local function setupGroupLocks(routesData, map)
         if map.switchlock[group] and not cli.confirm("Už namapováno, přemapovat?", false) then
             goto continue
         end
-        local clonkaName = cli.prompt("Jméno spárovaného Distant Signal (clonka) pro zámek " .. group)
-        local controller = autoOrPickComponent(
-            componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
-            "Digital Controller Box pro clonku závěru " .. group .. " v DK"
-        )
-        local normal = pickAspect(controller, "bílá / volno", "white")
-        local locked = pickAspect(controller, "zelená / uzamčeno", "green")
-        map.switchlock[group] = {controller = controller, clonkaName = clonkaName, aspects = {normal = normal, locked = locked}}
+        while true do
+            local clonkaName = cli.prompt("Jméno spárovaného Distant Signal (clonka) pro zámek " .. group)
+            local controller = autoOrPickComponent(
+                componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
+                "Digital Controller Box pro clonku závěru " .. group .. " v DK"
+            )
+            local normal = pickAspect(controller, "bílá / volno", "white")
+            local locked = pickAspect(controller, "zelená / uzamčeno", "green")
+
+            local choice = cli.reviewChoice({
+                "Zámek " .. group .. ": clonka='" .. tostring(clonkaName) .. "', controller=" .. tostring(controller),
+            })
+            if choice == "save" then
+                map.switchlock[group] = {controller = controller, clonkaName = clonkaName, aspects = {normal = normal, locked = locked}}
+                break
+            elseif choice == "skip" then
+                break
+            end
+        end
         ::continue::
     end
 end
@@ -174,12 +198,21 @@ local function setupNetwork(map)
     map.network = {peerAddress = peer, port = port}
 end
 
+-- Saved after every section (not just once at the end) -- see stavedlo/setup.lua's save()
+-- comment: re-running afterwards only requires answering "remap?" for whatever was wrong.
+local function save(map)
+    componentmap.save(MAP_PATH, map)
+    io.write("(uloženo)\n")
+end
+
 local function main()
     local config = loadLayout()
     local map = componentmap.load(MAP_PATH)
 
     classifySignals(config, map)
+    save(map)
     setupRunningLines(config, map)
+    save(map)
 
     local mainSignalGroups = {}
     for name, entry in pairs(map.signals) do
@@ -198,10 +231,12 @@ local function main()
         .. table.concat(routesData.groups, ", ") .. "\n")
 
     setupGateClonky(routesData, map)
+    save(map)
     setupGroupLocks(routesData, map)
+    save(map)
     setupNetwork(map)
+    save(map)
 
-    componentmap.save(MAP_PATH, map)
     io.write("\nHotovo. Mapování uloženo do " .. MAP_PATH .. ", cesty do " .. ROUTES_PATH .. ".\n")
     io.write("Spusť init.lua pro start systému.\n")
 end

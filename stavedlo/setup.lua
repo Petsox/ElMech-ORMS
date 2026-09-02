@@ -204,29 +204,44 @@ local function setupSwitches(config, map)
             goto continue
         end
 
-        local rioAddress, side, color, leverOwner
-        if cli.confirm("Je tato výhybka spojená s jinou (společná páčka)?", false) then
-            local otherCode = cli.prompt("Kód výhybky, se kterou sdílí páčku")
-            if not setupOwnerInline(config, map, otherCode) then
-                io.write("Výhybka '" .. tostring(otherCode) .. "' zůstává nenamapovaná -- výhybka " .. code .. " přeskočena.\n")
-                goto continue
+        -- Retry loop: a typo or wrong pick just now can be corrected immediately (choice
+        -- "retry") without restarting the whole wizard -- see cli.reviewChoice's doc comment.
+        while true do
+            local rioAddress, side, color, leverOwner
+            if cli.confirm("Je tato výhybka spojená s jinou (společná páčka)?", false) then
+                local otherCode = cli.prompt("Kód výhybky, se kterou sdílí páčku")
+                if not setupOwnerInline(config, map, otherCode) then
+                    io.write("Výhybka '" .. tostring(otherCode) .. "' zůstává nenamapovaná -- výhybka " .. code .. " přeskočena.\n")
+                    break
+                end
+                leverOwner = rootLeverOwner(map, otherCode)
+                io.write("Sdílí páčku s výhybkou " .. leverOwner .. ".\n")
+            else
+                rioAddress, side, color = promptSwitchLever(map, code)
+                if not rioAddress then
+                    io.write("Přeskočeno -- výhybka zůstane nenamapovaná.\n")
+                    break
+                end
             end
-            leverOwner = rootLeverOwner(map, otherCode)
-            io.write("Sdílí páčku s výhybkou " .. leverOwner .. ".\n")
-        else
-            rioAddress, side, color = promptSwitchLever(map, code)
-            if not rioAddress then
-                io.write("Přeskočeno -- výhybka zůstane nenamapovaná.\n")
-                goto continue
+
+            local controller, receiverName = promptSwitchDrive(code)
+
+            local choice = cli.reviewChoice({
+                "Výhybka " .. code .. ":",
+                leverOwner and ("  páčka: sdílená s výhybkou " .. leverOwner)
+                    or ("  páčka: " .. tostring(rioAddress) .. " / " .. tostring(side) .. " / " .. tostring(color)),
+                "  pohon: " .. tostring(controller) .. " / receiver '" .. tostring(receiverName) .. "'",
+            })
+            if choice == "save" then
+                map.switches[code] = {
+                    redstoneIO = rioAddress, side = side, color = color, leverOwner = leverOwner,
+                    controller = controller, receiverName = receiverName,
+                }
+                break
+            elseif choice == "skip" then
+                break
             end
         end
-
-        local controller, receiverName = promptSwitchDrive(code)
-
-        map.switches[code] = {
-            redstoneIO = rioAddress, side = side, color = color, leverOwner = leverOwner,
-            controller = controller, receiverName = receiverName,
-        }
         ::continue::
     end
 end
@@ -247,18 +262,28 @@ local function setupSignals(config, map)
         end
 
         local suggested = layout.suggestSignalKind(name)
-        io.write("Odhad typu (dle jména): " .. suggested .. "\n")
-        local kind = cli.prompt("Typ (main/expect/shunting/repeater/inserted)", suggested)
+        while true do
+            io.write("Odhad typu (dle jména): " .. suggested .. "\n")
+            local kind = cli.prompt("Typ (main/expect/shunting/repeater/inserted)", suggested)
 
-        local controller = autoOrPickComponent(
-            componentmap.TYPES.signalController, "getSignalNames", name,
-            "digitalController obsluhující toto návěstidlo", "návěstidlo"
-        )
+            local controller = autoOrPickComponent(
+                componentmap.TYPES.signalController, "getSignalNames", name,
+                "digitalController obsluhující toto návěstidlo", "návěstidlo"
+            )
 
-        map.signals[name] = {
-            controller = controller, kind = kind,
-            runningLine = existing and existing.runningLine or nil,
-        }
+            local choice = cli.reviewChoice({
+                "Návěstidlo " .. name .. ": typ=" .. kind .. ", controller=" .. tostring(controller),
+            })
+            if choice == "save" then
+                map.signals[name] = {
+                    controller = controller, kind = kind,
+                    runningLine = existing and existing.runningLine or nil,
+                }
+                break
+            elseif choice == "skip" then
+                break
+            end
+        end
         ::continue::
     end
 end
@@ -271,11 +296,19 @@ local function setupCrossings(config, map)
         if map.crossings[name] and not cli.confirm("Už namapováno, přemapovat?", false) then
             goto continue
         end
-        local controller = autoOrPickComponent(
-            componentmap.TYPES.crossingController, "getReceiverNames", name,
-            "digitalCrossController obsluhující tento přejezd", "přejezd"
-        )
-        map.crossings[name] = {controller = controller}
+        while true do
+            local controller = autoOrPickComponent(
+                componentmap.TYPES.crossingController, "getReceiverNames", name,
+                "digitalCrossController obsluhující tento přejezd", "přejezd"
+            )
+            local choice = cli.reviewChoice({"Přejezd " .. name .. ": controller=" .. tostring(controller)})
+            if choice == "save" then
+                map.crossings[name] = {controller = controller}
+                break
+            elseif choice == "skip" then
+                break
+            end
+        end
         ::continue::
     end
 end
@@ -322,14 +355,26 @@ local function setupGroupLocks(routesData, map)
         if map.switchlock[group] and not cli.confirm("Už namapováno, přemapovat?", false) then
             goto continue
         end
-        local clonkaName = cli.prompt("Jméno spárovaného Distant Signal (clonka) pro zámek " .. group)
-        local controller = autoOrPickComponent(
-            componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
-            "Digital Controller Box pro clonku závěru " .. group, "clonka"
-        )
-        local normal = pickAspect(controller, "bílá / volno", "white")
-        local locked = pickAspect(controller, "zelená / uzamčeno", "green")
-        map.switchlock[group] = {controller = controller, clonkaName = clonkaName, aspects = {normal = normal, locked = locked}}
+        while true do
+            local clonkaName = cli.prompt("Jméno spárovaného Distant Signal (clonka) pro zámek " .. group)
+            local controller = autoOrPickComponent(
+                componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
+                "Digital Controller Box pro clonku závěru " .. group, "clonka"
+            )
+            local normal = pickAspect(controller, "bílá / volno", "white")
+            local locked = pickAspect(controller, "zelená / uzamčeno", "green")
+
+            local choice = cli.reviewChoice({
+                "Zámek " .. group .. ": clonka='" .. tostring(clonkaName) .. "', controller=" .. tostring(controller),
+                "  aspekty: volno=" .. tostring(normal) .. ", uzamčeno=" .. tostring(locked),
+            })
+            if choice == "save" then
+                map.switchlock[group] = {controller = controller, clonkaName = clonkaName, aspects = {normal = normal, locked = locked}}
+                break
+            elseif choice == "skip" then
+                break
+            end
+        end
         ::continue::
     end
 end
@@ -345,12 +390,22 @@ local function setupRouteLocks(routesData, map)
         if map.routeLocks[r.id] and not cli.confirm("Už namapováno, přemapovat?", false) then
             goto continue
         end
-        local rioAddress, side, color = promptLever(map, "Redstone I/O pro páčku kolejového závěrníku", nil, r.id)
-        if not rioAddress then
-            io.write("Přeskočeno -- cesta zůstane bez kolejového závěrníku (nepůjde zamknout závěr výměn).\n")
-            goto continue
+        while true do
+            local rioAddress, side, color = promptLever(map, "Redstone I/O pro páčku kolejového závěrníku", nil, r.id)
+            if not rioAddress then
+                io.write("Přeskočeno -- cesta zůstane bez kolejového závěrníku (nepůjde zamknout závěr výměn).\n")
+                break
+            end
+            local choice = cli.reviewChoice({
+                "Kolejový závěrník " .. r.id .. ": " .. rioAddress .. " / " .. side .. " / " .. color,
+            })
+            if choice == "save" then
+                map.routeLocks[r.id] = {redstoneIO = rioAddress, side = side, color = color}
+                break
+            elseif choice == "skip" then
+                break
+            end
         end
-        map.routeLocks[r.id] = {redstoneIO = rioAddress, side = side, color = color}
         ::continue::
     end
 end
@@ -365,31 +420,44 @@ local function setupGates(config, map)
                 goto continue
             end
 
-            local hradloClonkaName = cli.prompt("Jméno clonky hradla (Distant Signal)")
-            local hradloController = autoOrPickComponent(
-                componentmap.TYPES.controllerBox, "getSignalNames", hradloClonkaName,
-                "Digital Controller Box pro clonku hradla " .. name, "clonka"
-            )
-            local hradloNormal = pickAspect(hradloController, "červená / normální", "red")
-            local hradloActive = pickAspect(hradloController, "bílá / aktivní", "white")
+            while true do
+                local hradloClonkaName = cli.prompt("Jméno clonky hradla (Distant Signal)")
+                local hradloController = autoOrPickComponent(
+                    componentmap.TYPES.controllerBox, "getSignalNames", hradloClonkaName,
+                    "Digital Controller Box pro clonku hradla " .. name, "clonka"
+                )
+                local hradloNormal = pickAspect(hradloController, "červená / normální", "red")
+                local hradloActive = pickAspect(hradloController, "bílá / aktivní", "white")
 
-            local zarazkaClonkaName = cli.prompt("Jméno clonky hradlové zarážky (Distant Signal)")
-            local zarazkaController = autoOrPickComponent(
-                componentmap.TYPES.controllerBox, "getSignalNames", zarazkaClonkaName,
-                "Digital Controller Box pro clonku hradlové zarážky " .. name, "clonka"
-            )
-            local zarazkaNormal = pickAspect(zarazkaController, "černá / normální", "black")
-            local zarazkaActive = pickAspect(zarazkaController, "bílá / aktivní", "white")
+                local zarazkaClonkaName = cli.prompt("Jméno clonky hradlové zarážky (Distant Signal)")
+                local zarazkaController = autoOrPickComponent(
+                    componentmap.TYPES.controllerBox, "getSignalNames", zarazkaClonkaName,
+                    "Digital Controller Box pro clonku hradlové zarážky " .. name, "clonka"
+                )
+                local zarazkaNormal = pickAspect(zarazkaController, "černá / normální", "black")
+                local zarazkaActive = pickAspect(zarazkaController, "bílá / aktivní", "white")
 
-            local detectorAddress = pickComponent(componentmap.TYPES.detector, "Digital Detector pro hradlovou zarážku " .. name)
+                local detectorAddress = pickComponent(componentmap.TYPES.detector, "Digital Detector pro hradlovou zarážku " .. name)
 
-            map.gates[name] = {
-                hradloController = hradloController, hradloClonkaName = hradloClonkaName,
-                hradloAspects = {normal = hradloNormal, active = hradloActive},
-                zarazkaController = zarazkaController, zarazkaClonkaName = zarazkaClonkaName,
-                zarazkaAspects = {normal = zarazkaNormal, active = zarazkaActive},
-                detectorAddress = detectorAddress,
-            }
+                local choice = cli.reviewChoice({
+                    "Hradlo " .. name .. ":",
+                    "  hradlo clonka: '" .. tostring(hradloClonkaName) .. "' na " .. tostring(hradloController),
+                    "  zarážka clonka: '" .. tostring(zarazkaClonkaName) .. "' na " .. tostring(zarazkaController),
+                    "  detektor: " .. tostring(detectorAddress),
+                })
+                if choice == "save" then
+                    map.gates[name] = {
+                        hradloController = hradloController, hradloClonkaName = hradloClonkaName,
+                        hradloAspects = {normal = hradloNormal, active = hradloActive},
+                        zarazkaController = zarazkaController, zarazkaClonkaName = zarazkaClonkaName,
+                        zarazkaAspects = {normal = zarazkaNormal, active = zarazkaActive},
+                        detectorAddress = detectorAddress,
+                    }
+                    break
+                elseif choice == "skip" then
+                    break
+                end
+            end
         end
         ::continue::
     end
@@ -403,14 +471,27 @@ local function setupNetwork(map)
     map.network = {peerAddress = peer, port = port}
 end
 
+-- Saved after every section (not just once at the end) so an interrupted or aborted run never
+-- loses earlier progress -- re-running setup.lua afterwards will offer "already mapped,
+-- remap?" for everything already done, and skipping through those is the practical way to go
+-- back and fix just the one entity that was wrong without redoing the whole wizard.
+local function save(map)
+    componentmap.save(MAP_PATH, map)
+    io.write("(uloženo)\n")
+end
+
 local function main()
     local config = loadLayout()
     local map = componentmap.load(MAP_PATH)
 
     setupSwitches(config, map)
+    save(map)
     setupSignals(config, map)
+    save(map)
     setupCrossings(config, map)
+    save(map)
     setupRunningLines(config, map)
+    save(map)
 
     local mainSignalGroups = {}
     for name, entry in pairs(map.signals) do
@@ -429,11 +510,14 @@ local function main()
         .. table.concat(routesData.groups, ", ") .. "\n")
 
     setupGroupLocks(routesData, map)
+    save(map)
     setupRouteLocks(routesData, map)
+    save(map)
     setupGates(config, map)
+    save(map)
     setupNetwork(map)
+    save(map)
 
-    componentmap.save(MAP_PATH, map)
     io.write("\nHotovo. Mapování uloženo do " .. MAP_PATH .. ", cesty do " .. ROUTES_PATH .. ".\n")
     io.write("Spusť init.lua pro start systému.\n")
 end

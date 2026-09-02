@@ -62,4 +62,28 @@ function cli.header(text)
     io.write("\n== " .. text .. " ==\n")
 end
 
+-- Shows a summary of what's about to be saved for one entity and lets the user confirm it,
+-- redo it (typo/wrong pick just now, without restarting the whole wizard), or skip it. Wrap the
+-- per-entity collection code in a `while true do ... end` loop and act on the returned choice --
+-- "save" commits and breaks, "retry" loops back to collect again, "skip" breaks without saving.
+-- summaryLines: array of already-formatted display strings (no numbering needed).
+function cli.reviewChoice(summaryLines)
+    io.write("\nSouhrn:\n")
+    for _, line in ipairs(summaryLines) do
+        io.write("  " .. line .. "\n")
+    end
+    while true do
+        io.write("Uložit? (a)no / (z)novu vyplnit / (p)řeskočit: ")
+        local answer = (io.read("l") or ""):lower()
+        if answer == "a" or answer == "" then
+            return "save"
+        elseif answer == "z" then
+            return "retry"
+        elseif answer == "p" then
+            return "skip"
+        end
+        io.write("Neplatná volba.\n")
+    end
+end
+
 return cli
