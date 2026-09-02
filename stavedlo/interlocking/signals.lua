@@ -1,14 +1,24 @@
 -- Vjezdové/odjezdové návěstidlo: the entrance/exit signal only clears once its route's závěr
 -- výměn is actually locked AND every crossing the route uses reports its arm physically down
--- (not just "commanded closed") -- step 3 of the design's sequence. restore() sets the signal
--- back to its wizard-confirmed stop state; there's no per-signal "most restrictive" call in the
--- digitalController API (setMostRestrictiveOnAll only applies to a whole controller at once), so
--- the stop state name is recorded per-signal by the setup wizard instead.
+-- (not just "commanded closed") -- step 3 of the design's sequence.
+--
+-- State NAMES are never asked from the user (setup.lua has no prompt for them at all) -- checked
+-- against ORMS (github.com/Petsox/Open-Rail-Management-System, automatic-route-building branch),
+-- which hardcodes exactly the same fixed SignalCraft vocabulary ("Stuj", "Volno", "R40Volno", ...)
+-- throughout its own code rather than configuring it per station. "Stuj" is the universal stop
+-- state; a cleared main signal shows "Volno" for a straight route, or "R40Volno" for a diverging
+-- one if that signal actually supports it (matching ORMS's defaultCurveState/chooseProceedState:
+-- not every signal has an R40 variant, so this is confirmed live via getValidStatesForSignal and
+-- falls back to plain "Volno" when it isn't offered).
 local signaldrv = require("hw.signaldrv")
 local crossingdrv = require("hw.crossingdrv")
+local component = require("component")
 
 local signals = {}
 signals.__index = signals
+
+signals.STUJ = "Stuj"
+signals.VOLNO = "Volno"
 
 function signals.new(map, switchlockObj)
     local self = setmetatable({}, signals)
@@ -17,8 +27,28 @@ function signals.new(map, switchlockObj)
     return self
 end
 
+local function hasValidState(entry, signalName, wantedState)
+    if not entry or not entry.controller then
+        return false
+    end
+    local ok, proxy = pcall(component.proxy, entry.controller)
+    if not ok then
+        return false
+    end
+    local okStates, states = pcall(proxy.getValidStatesForSignal, signalName)
+    if not okStates or type(states) ~= "table" then
+        return false
+    end
+    for _, s in pairs(states) do
+        if tostring(s):lower() == wantedState:lower() then
+            return true
+        end
+    end
+    return false
+end
+
 -- Signalista's entrance/exit signal lever.
-function signals:clear(entranceName, routeId, state)
+function signals:clear(entranceName, routeId)
     if self.switchlock:state(routeId) ~= "locked" then
         return false, "not_locked"
     end
@@ -31,15 +61,17 @@ function signals:clear(entranceName, routeId, state)
         end
     end
 
-    return signaldrv.setState(self.map.signals[entranceName], entranceName, state)
+    local entry = self.map.signals[entranceName]
+    local state = signals.VOLNO
+    if not route.allStraight and hasValidState(entry, entranceName, "R40Volno") then
+        state = "R40Volno"
+    end
+
+    return signaldrv.setState(entry, entranceName, state)
 end
 
 function signals:restore(entranceName)
-    local entry = self.map.signals[entranceName]
-    if not entry or not entry.stopState then
-        return false, "unmapped"
-    end
-    return signaldrv.setState(entry, entranceName, entry.stopState)
+    return signaldrv.setState(self.map.signals[entranceName], entranceName, signals.STUJ)
 end
 
 function signals:reset()

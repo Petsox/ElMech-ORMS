@@ -231,6 +231,11 @@ local function setupSwitches(config, map)
     end
 end
 
+-- No prompt for state names anywhere here -- checked against ORMS, which hardcodes the fixed
+-- SignalCraft state vocabulary ("Stuj"/"Volno"/"R40Volno"/...) rather than asking per station.
+-- interlocking/signals.lua uses those same constants directly at runtime (querying
+-- getValidStatesForSignal live only to confirm R40Volno is actually offered, never storing
+-- anything here) -- see its module doc comment.
 local function setupSignals(config, map)
     cli.header("Návěstidla")
     for _, sig in ipairs(config.Signals or {}) do
@@ -250,39 +255,9 @@ local function setupSignals(config, map)
             "digitalController obsluhující toto návěstidlo", "návěstidlo"
         )
 
-        local stopState, clearStraight, clearDiverging = nil, nil, nil
-        local runningLine = existing and existing.runningLine or nil
-        if kind == "main" and controller then
-            local stateList = {}
-            local ok, proxy = pcall(component.proxy, controller)
-            if ok then
-                local okStates, states = pcall(proxy.getValidStatesForSignal, name)
-                if okStates and type(states) == "table" then
-                    for _, st in pairs(states) do
-                        stateList[#stateList + 1] = st
-                    end
-                end
-            end
-
-            if #stateList > 0 then
-                io.write("Vyber stav 'Stůj' (Enter/0 pro ruční zadání):\n")
-                stopState = cli.pick(stateList, function(s) return s end, true)
-                io.write("Vyber stav 'Volno' pro přímý směr:\n")
-                clearStraight = cli.pick(stateList, function(s) return s end, true)
-                io.write("Vyber stav 'Volno' pro odbočku (přeskoč pro stejný jako přímý):\n")
-                clearDiverging = cli.pick(stateList, function(s) return s end, true) or clearStraight
-            else
-                io.write("Nepodařilo se živě zjistit platné stavy -- zadej ručně.\n")
-            end
-
-            stopState = stopState or cli.prompt("Název stavu 'Stůj' pro toto návěstidlo")
-            clearStraight = clearStraight or cli.prompt("Název stavu pro 'volno, přímý směr' (Route.allStraight = true)")
-            clearDiverging = clearDiverging or cli.prompt("Název stavu pro 'volno, odbočka' (Route.allStraight = false)", clearStraight)
-        end
-
         map.signals[name] = {
-            controller = controller, kind = kind, stopState = stopState,
-            clearStraight = clearStraight, clearDiverging = clearDiverging, runningLine = runningLine,
+            controller = controller, kind = kind,
+            runningLine = existing and existing.runningLine or nil,
         }
         ::continue::
     end

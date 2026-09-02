@@ -18,9 +18,10 @@ function componentmap.empty()
                          --   always points at a switch that owns its lever directly (setup.lua flattens chains),
                          --   so resolveLeverEntry below never has to recurse.
         signals = {},     -- [signalName] = {controller=addr, kind="main"|"expect"|"shunting"|"repeater"|"inserted",
-                          --   stopState=str, clearStraight=str, clearDiverging=str,  -- last 3 only set for kind=="main"
-                          --   runningLine=str}  -- only set for kind=="main": which traťová kolej (T-label) this
-                          --   entrance/odjezdové signal belongs to -- see common/routes.lua's grouping.
+                          --   runningLine=str}  -- runningLine only set for kind=="main": which traťová kolej
+                          --   (T-label) this entrance/odjezdové signal belongs to -- see common/routes.lua's
+                          --   grouping. State NAMES are never stored here -- see interlocking/signals.lua's doc
+                          --   comment for why (ORMS hardcodes the same fixed vocabulary instead of configuring it).
         crossings = {},    -- [crossingName] = {controller=addr}
         switchlock = {},    -- [runningLineLabel] = {controller=addr, clonkaName=str, aspects={normal=n, locked=n}}
                             --   one entry per routes.json group (e.g. "T1"/"T2"/"T4"), not per route.

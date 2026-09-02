@@ -158,10 +158,7 @@ for i, s in ipairs(mainSignals) do
         if not routeId then
             return
         end
-        local route = lock.routesById[routeId]
-        local mapped = map.signals[name]
-        local state = route.allStraight and mapped.clearStraight or mapped.clearDiverging
-        local ok, err = sig:clear(name, routeId, state)
+        local ok, err = sig:clear(name, routeId)
         if not ok then
             io.write("Návěst " .. name .. ": " .. tostring(err) .. "\n")
         end
