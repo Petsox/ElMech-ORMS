@@ -19,7 +19,7 @@ local sides = require("sides")
 local switchio = {}
 
 switchio.COLOR_NAMES = {
-    "white", "orange", "magenta", "lightBlue", "lime", "pink", "gray",
+    "white", "orange", "magenta", "lightBlue", "yellow", "lime", "pink", "gray",
     "lightGray", "cyan", "purple", "blue", "brown", "green", "red", "black",
 }
 
