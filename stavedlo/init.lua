@@ -228,9 +228,10 @@ end
 --------------------------------------------------------------------------------
 -- Poll loop: mirrors hardware into the GUI, and applies Control Panel lever movements to the
 -- actual switch motors (blocked while the switch is inside a locked/reserved route). Spojené
--- výhybky (map.switches[code].leverOwner set) share one physical lever -- the lever is only ever
--- read once per group, off the owner's redstoneIO entry, and the resulting position is applied
--- to every member's own motor (each still has its own controller/receiverName).
+-- výhybky (map.switches[code].leverOwner set) share one physical lever AND one physical
+-- indicator lamp -- both are only ever read/driven once per group, off the owner's entry, while
+-- the resulting position is still applied to every member's own motor (each still has its own
+-- controller/receiverName).
 
 local lastLever = {}
 local reportedLeverErrors = {}
@@ -247,18 +248,16 @@ local function pollSwitches()
             elseif lastLever[code] == nil or reading ~= lastLever[code] then
                 if not lock:isSwitchLocked(code) then
                     for _, memberCode in ipairs(componentmap.leverGroup(map, code)) do
-                        local memberEntry = map.switches[memberCode]
-                        local ok, driveErr = switchdrv.setPosition(memberEntry, reading)
+                        local ok, driveErr = switchdrv.setPosition(map.switches[memberCode], reading)
                         if not ok and not reportedLeverErrors["drive:" .. memberCode] then
                             reportedLeverErrors["drive:" .. memberCode] = true
                             io.write("Výhybka " .. memberCode .. ": nelze přestavit motor (" .. tostring(driveErr) .. ") -- zkontroluj digitalUnivController/jméno receiveru.\n")
                         end
-                        -- Each switch has its OWN indicator light (never the lever's
-                        -- redstoneIO/side/color -- see componentmap.lua's schema comment on why
-                        -- reusing that would stick the lever reading permanently).
-                        switchio.setIndicator(memberEntry.indicator, reading)
                         lastLever[memberCode] = reading
                     end
+                    -- One indicator per lever group (one physical lamp for the shared lever),
+                    -- never per switch -- see componentmap.resolveIndicatorEntry's doc comment.
+                    switchio.setIndicator(componentmap.resolveIndicatorEntry(map, code), reading)
                 end
             end
         end

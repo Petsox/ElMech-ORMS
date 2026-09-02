@@ -238,7 +238,7 @@ local function setupSwitches(config, map)
         -- Retry loop: a typo or wrong pick just now can be corrected immediately (choice
         -- "retry") without restarting the whole wizard -- see cli.reviewChoice's doc comment.
         while true do
-            local rioAddress, side, color, leverOwner
+            local rioAddress, side, color, leverOwner, indicator
             if cli.confirm("Je tato výhybka spojená s jinou (společná páčka)?", false) then
                 local otherCode = cli.prompt("Kód výhybky, se kterou sdílí páčku")
                 if not setupOwnerInline(config, map, otherCode) then
@@ -246,28 +246,35 @@ local function setupSwitches(config, map)
                     break
                 end
                 leverOwner = rootLeverOwner(map, otherCode)
-                io.write("Sdílí páčku s výhybkou " .. leverOwner .. ".\n")
+                io.write("Sdílí páčku i kontrolku s výhybkou " .. leverOwner .. ".\n")
+                -- indicator stays nil -- resolved through leverOwner at runtime (one physical
+                -- lamp for the shared lever, just like the lever itself), never asked here.
             else
                 rioAddress, side, color = promptSwitchLever(map, code)
                 if not rioAddress then
                     io.write("Přeskočeno -- výhybka zůstane nenamapovaná.\n")
                     break
                 end
+                indicator = promptSwitchIndicator(map, code)
             end
 
             local controller, receiverName = promptSwitchDrive(code)
-            -- Own indicator regardless of leverOwner -- indicators are per-switch, never shared
-            -- (see componentmap.lua's schema comment).
-            local indicator = promptSwitchIndicator(map, code)
 
-            local choice = cli.reviewChoice({
-                "Výhybka " .. code .. ":",
-                leverOwner and ("  páčka: sdílená s výhybkou " .. leverOwner)
-                    or ("  páčka: " .. tostring(rioAddress) .. " / " .. tostring(side) .. " / " .. tostring(color)),
-                "  pohon: " .. tostring(controller) .. " / receiver '" .. tostring(receiverName) .. "'",
-                indicator and ("  kontrolka: " .. indicator.redstoneIO .. " / " .. indicator.side .. " / " .. indicator.color)
-                    or "  kontrolka: (nenamapováno)",
-            })
+            -- Built up rather than as one table literal -- a literal nil in the middle of an
+            -- array constructor would make ipairs (inside cli.reviewChoice) stop early and
+            -- silently drop every line after it.
+            local summary = {"Výhybka " .. code .. ":"}
+            if leverOwner then
+                summary[#summary + 1] = "  páčka + kontrolka: sdílené s výhybkou " .. leverOwner
+            else
+                summary[#summary + 1] = "  páčka: " .. tostring(rioAddress) .. " / " .. tostring(side) .. " / " .. tostring(color)
+                summary[#summary + 1] = indicator
+                    and ("  kontrolka: " .. indicator.redstoneIO .. " / " .. indicator.side .. " / " .. indicator.color)
+                    or "  kontrolka: (nenamapováno)"
+            end
+            summary[#summary + 1] = "  pohon: " .. tostring(controller) .. " / receiver '" .. tostring(receiverName) .. "'"
+
+            local choice = cli.reviewChoice(summary)
             if choice == "save" then
                 map.switches[code] = {
                     redstoneIO = rioAddress, side = side, color = color, leverOwner = leverOwner, indicator = indicator,

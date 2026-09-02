@@ -19,12 +19,14 @@ function componentmap.empty()
                          --   driving the light's output can feed back into the lever's own input reading and
                          --   permanently stick it (confirmed in practice: switch moved once, then never again,
                          --   indicator stuck lit even across a restart, because the redstone output itself
-                         --   persists in the world). leverOwner: "spojené výhybky" -- when set, this switch has no
-                         --   lever of its own (redstoneIO/side/color are nil) and shares the named switch's
-                         --   physical lever; it still has its own controller/receiverName (own motor) AND its own
-                         --   `indicator` (indicators are per-switch, not shared, even when the lever is). leverOwner
-                         --   always points at a switch that owns its lever directly (setup.lua flattens chains),
-                         --   so resolveLeverEntry below never has to recurse.
+                         --   persists in the world). leverOwner: "spojená výhybka" -- when set, this switch has no
+                         --   lever or indicator of its own (redstoneIO/side/color and indicator are nil) and
+                         --   shares BOTH the named switch's physical lever AND its physical indicator lamp (one
+                         --   lamp per shared lever, confirmed -- not one per switch); it still has its own
+                         --   controller/receiverName (own motor). Use componentmap.resolveIndicatorEntry, not this
+                         --   field directly, to get the indicator that actually applies to a given switch code.
+                         --   leverOwner always points at a switch that owns its lever directly (setup.lua flattens
+                         --   chains), so resolveLeverEntry below never has to recurse.
         signals = {},     -- [signalName] = {controller=addr, kind="main"|"expect"|"shunting"|"repeater"|"inserted",
                           --   runningLine=str}  -- runningLine only set for kind=="main": which traťová kolej
                           --   (T-label) this entrance/odjezdové signal belongs to -- see common/routes.lua's
@@ -96,6 +98,15 @@ function componentmap.resolveLeverEntry(map, code)
         return map.switches[entry.leverOwner]
     end
     return entry
+end
+
+-- Resolves the indicator entry ({redstoneIO, side, color}) that lights up for `code` -- always
+-- the lever owner's `.indicator` (one physical lamp per shared lever, exactly like the lever
+-- itself is one physical handle for the group), never a linked switch's own. setup.lua only ever
+-- prompts for `.indicator` on the owner; a linked switch's own `.indicator` field stays nil.
+function componentmap.resolveIndicatorEntry(map, code)
+    local ownerEntry = componentmap.resolveLeverEntry(map, code)
+    return ownerEntry and ownerEntry.indicator or nil
 end
 
 -- Every switch code that shares a physical lever with `code` (code itself and, transitively via
