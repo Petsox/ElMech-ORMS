@@ -47,29 +47,38 @@ if #addresses == 0 then
     return
 end
 
-local address = addresses[1]
-if #addresses > 1 then
-    print("\nNalezeno více komponent, používám první: " .. address)
-    print("(pokud chceš jinou, uprav 'address' na začátku skriptu -- řádek 'local address = addresses[1]')")
+-- Polls every discovered redstone component (not just the first), so a lever wired to any of
+-- them shows up -- each line is prefixed with the short address so you know which physical
+-- Redstone I/O block it actually belongs to.
+local proxies = {}
+for _, address in ipairs(addresses) do
+    local proxy = component.proxy(address)
+    if proxy.getBundledInput then
+        proxies[#proxies + 1] = {address = address, short = address:sub(1, 8), proxy = proxy}
+    else
+        print("\n" .. address .. " nemá metodu getBundledInput -- vynechávám ji z živého čtení.")
+    end
 end
-local proxy = component.proxy(address)
 
-if not proxy.getBundledInput then
-    print("\nTato komponenta vůbec nemá metodu getBundledInput -- API je jiné, než skript předpokládá.")
+if #proxies == 0 then
+    print("\nŽádná z nalezených komponent nemá getBundledInput -- API je jiné, než skript předpokládá.")
     print("Podívej se na seznam metod výše a napiš mi, co tam skutečně je.")
     return
 end
 
-print("\n== Živé čtení getBundledInput(side, color) pro " .. address .. " ==")
-print("Zmáčkni páčku na Control Panelu -- sleduj, která hodnota (strana / barva) se změní. Ctrl+C pro konec.\n")
+print("\n== Živé čtení getBundledInput(side, color) na " .. #proxies .. " komponentě/ách ==")
+print("Zmáčkni páčku na Control Panelu -- sleduj, která hodnota (adresa / strana / barva) se změní. Ctrl+C pro konec.\n")
 
 while true do
-    for _, sideName in ipairs(SIDE_NAMES) do
-        local side = sides[sideName]
-        for i, colorName in ipairs(COLOR_NAMES) do
-            local ok, value = pcall(proxy.getBundledInput, side, i - 1)
-            if ok and value and value > 0 then
-                print(os.date("%H:%M:%S") .. "  " .. sideName .. " / " .. colorName .. " (index " .. (i - 1) .. ") = " .. tostring(value))
+    for _, entry in ipairs(proxies) do
+        for _, sideName in ipairs(SIDE_NAMES) do
+            local side = sides[sideName]
+            for i, colorName in ipairs(COLOR_NAMES) do
+                local ok, value = pcall(entry.proxy.getBundledInput, side, i - 1)
+                if ok and value and value > 0 then
+                    print(os.date("%H:%M:%S") .. "  " .. entry.short .. "  " .. sideName .. " / " .. colorName
+                        .. " (index " .. (i - 1) .. ") = " .. tostring(value))
+                end
             end
         end
     end
