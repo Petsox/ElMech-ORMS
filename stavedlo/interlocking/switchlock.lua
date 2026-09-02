@@ -80,18 +80,23 @@ function switchlock:groupFor(routeId)
     return route and route.group or nil
 end
 
--- Whether switchCode is used by any currently reserved/locked route -- the kolejový závěrník
--- blocking manual relever while true. init.lua's switch-poll loop consults this before ever
--- applying a lever movement to the physical switch motor. Also true when a spojená výhybka
--- sharing this switch's lever is itself locked (see componentmap.leverGroup) -- the lever can't
--- move independently of that group-mate, so it must be blocked here too even if this exact
--- switch code isn't named by any active route.
+-- Whether switchCode is used by a route whose závěr výměn is already LOCKED (state=="locked",
+-- i.e. confirmLock has run) -- this, not mere reservation, is the kolejový závěrník that blocks
+-- manual relever. A route that's only "reserved" (hradlo active) must still let the signalista
+-- physically set its switches -- that's the whole point of that phase -- so this deliberately
+-- does not block on "reserved". init.lua's switch-poll loop consults this before ever applying a
+-- lever movement to the physical switch motor. Also true when a spojená výhybka sharing this
+-- switch's lever is itself locked (see componentmap.leverGroup) -- the lever can't move
+-- independently of that group-mate, so it must be blocked here too even if this exact switch
+-- code isn't named by any locked route.
 function switchlock:isSwitchLocked(switchCode)
     for _, code in ipairs(componentmap.leverGroup(self.map, switchCode)) do
-        for routeId in pairs(self.slots) do
-            local route = self.routesById[routeId]
-            if route.switches[code] then
-                return true
+        for routeId, slot in pairs(self.slots) do
+            if slot.state == "locked" then
+                local route = self.routesById[routeId]
+                if route.switches[code] then
+                    return true
+                end
             end
         end
     end
