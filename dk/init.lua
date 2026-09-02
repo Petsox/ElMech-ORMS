@@ -164,6 +164,15 @@ end
 --------------------------------------------------------------------------------
 -- Network
 
+-- GUI.label's draw doesn't clear its own background before drawing new text (see
+-- grapes/GUI.lua's drawLabel), so setting a SHORTER string than what was there before leaves the
+-- old text's tail visible past the end of the new one. Pad to the label's own width instead of
+-- setting .text directly wherever it changes repeatedly.
+local function setLabelText(label, str)
+    local pad = label.width - unicode.len(str)
+    label.text = pad > 0 and (str .. string.rep(" ", pad)) or str
+end
+
 local function driveGateClonka(entranceName, active)
     local entry = map.gates[entranceName]
     if not entry then
@@ -193,7 +202,7 @@ local function onNetworkMessage(msgType, payload, senderAddress)
         if not payload.active then
             local row = rows[payload.entrance]
             if row then
-                row.stateLabel.text = "hradlo neaktivní"
+                setLabelText(row.stateLabel, "hradlo neaktivní")
             end
         end
     elseif msgType == "LOCK_STATE" then
@@ -229,13 +238,13 @@ event.timer(1, function()
         local pending = rsel:pendingRouteFor(name)
         local active = rsel:activeRouteFor(name)
         if pending then
-            row.stateLabel.text = "vybráno: " .. pending
+            setLabelText(row.stateLabel, "vybráno: " .. pending)
             row.stateLabel.colors.text = YELLOW
         elseif active then
-            row.stateLabel.text = active .. " (" .. tostring(rsel.lockState[active] or "reserved") .. ")"
+            setLabelText(row.stateLabel, active .. " (" .. tostring(rsel.lockState[active] or "reserved") .. ")")
             row.stateLabel.colors.text = rsel:isGateActive(name) and GREEN or GRAY
         else
-            row.stateLabel.text = "-"
+            setLabelText(row.stateLabel, "-")
             row.stateLabel.colors.text = GRAY
         end
     end

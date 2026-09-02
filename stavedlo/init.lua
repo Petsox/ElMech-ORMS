@@ -261,6 +261,15 @@ local function pollSwitches()
     end
 end
 
+-- GUI.label's draw doesn't clear its own background before drawing new text (see
+-- grapes/GUI.lua's drawLabel), so setting a SHORTER string than what was there before leaves the
+-- old text's tail visible past the end of the new one. Pad to the label's own width instead of
+-- setting .text directly wherever it changes repeatedly.
+local function setLabelText(label, str)
+    local pad = label.width - unicode.len(str)
+    label.text = pad > 0 and (str .. string.rep(" ", pad)) or str
+end
+
 local function refreshDiagram()
     for code, sw in pairs(switchObjects) do
         local plus = lastLever[code]
@@ -288,7 +297,7 @@ local function refreshDiagram()
             label = routeId .. " (" .. state .. ")"
             color = state == "locked" and GREEN or YELLOW
         end
-        row.stateLabel.text = label
+        setLabelText(row.stateLabel, label)
         row.stateLabel.colors.text = color
         signalObjects[name].color = color
     end
