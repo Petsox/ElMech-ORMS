@@ -106,35 +106,52 @@ local function findSwitchConfig(config, code)
     return nil
 end
 
--- Every colour already used on (rioAddress, side) by some OTHER switch/kolejový závěrník --
+-- Every colour already used on (rioAddress, side) by some OTHER entry of the same kind --
 -- excludeSwitchCode/excludeRouteId skip the entry currently being (re)configured, so remapping a
 -- switch back onto its own existing colour still works.
-local function usedColorsFor(map, rioAddress, side, excludeSwitchCode, excludeRouteId)
+--
+-- kind="lever": scans switch levers + kolejové závěrníky (they're both a plain input on the
+-- Control Panel, sharing one 16-colour bundled cable per (address, side)).
+-- kind="indicator": scans switch INDICATOR lights only, a separate namespace -- confirmed in
+-- practice that reusing a switch's own lever (redstoneIO, side, color) for its indicator output
+-- can feed the output back into the input reading and permanently stick it (see
+-- componentmap.lua's schema comment), so indicator colours must never be checked against, or
+-- picked from, the lever/routeLock namespace.
+local function usedColorsFor(map, rioAddress, side, kind, excludeSwitchCode, excludeRouteId)
     local used = {}
-    for code, entry in pairs(map.switches) do
-        if code ~= excludeSwitchCode and entry.redstoneIO == rioAddress and entry.side == side and entry.color then
-            used[entry.color] = true
+    if kind == "indicator" then
+        for code, entry in pairs(map.switches) do
+            local ind = entry.indicator
+            if code ~= excludeSwitchCode and ind and ind.redstoneIO == rioAddress and ind.side == side and ind.color then
+                used[ind.color] = true
+            end
         end
-    end
-    for routeId, entry in pairs(map.routeLocks) do
-        if routeId ~= excludeRouteId and entry.redstoneIO == rioAddress and entry.side == side and entry.color then
-            used[entry.color] = true
+    else
+        for code, entry in pairs(map.switches) do
+            if code ~= excludeSwitchCode and entry.redstoneIO == rioAddress and entry.side == side and entry.color then
+                used[entry.color] = true
+            end
+        end
+        for routeId, entry in pairs(map.routeLocks) do
+            if routeId ~= excludeRouteId and entry.redstoneIO == rioAddress and entry.side == side and entry.color then
+                used[entry.color] = true
+            end
         end
     end
     return used
 end
 
--- Shared by switch levers and kolejový závěrník levers -- both are a plain redstoneIO/side/color
--- Control Panel input, and both draw from the same 16-colour bundled cable per (address, side),
--- so a colour already claimed by either kind must not be offered again for the other.
-local function promptLever(map, promptText, excludeSwitchCode, excludeRouteId)
+-- Shared by switch levers, kolejový závěrník levers, and switch indicators -- all three are a
+-- plain redstoneIO/side/color Control Panel connection, just input vs. output and different
+-- colour namespaces (see usedColorsFor's doc comment on why kind matters).
+local function promptLever(map, promptText, kind, excludeSwitchCode, excludeRouteId)
     local rioAddress = pickComponent(componentmap.TYPES.redstone, promptText)
     if not rioAddress then
         return nil
     end
     local side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
 
-    local used = usedColorsFor(map, rioAddress, side, excludeSwitchCode, excludeRouteId)
+    local used = usedColorsFor(map, rioAddress, side, kind, excludeSwitchCode, excludeRouteId)
     local available = {}
     for _, c in ipairs(switchio.COLOR_NAMES) do
         if not used[c] then
@@ -150,7 +167,20 @@ local function promptLever(map, promptText, excludeSwitchCode, excludeRouteId)
 end
 
 local function promptSwitchLever(map, excludeSwitchCode)
-    return promptLever(map, "Redstone I/O pro páčku/světlo", excludeSwitchCode, nil)
+    return promptLever(map, "Redstone I/O pro páčku (vstup)", "lever", excludeSwitchCode, nil)
+end
+
+-- Separate physical Control Panel (per the design: levers on one panel, indicator lights on a
+-- second one next to it) -- must never reuse the lever's own (redstoneIO, side, color).
+-- Skippable: an unmapped indicator just means the light never lights up, lever/motor still work.
+local function promptSwitchIndicator(map, code)
+    io.write("Kontrolka pro výhybku " .. code .. " (druhý Control Panel se světly, výstup):\n")
+    local rioAddress, side, color = promptLever(map, "Redstone I/O pro kontrolku (výstup)", "indicator", code, nil)
+    if not rioAddress then
+        io.write("Přeskočeno -- výhybka " .. code .. " zůstane bez kontrolky.\n")
+        return nil
+    end
+    return {redstoneIO = rioAddress, side = side, color = color}
 end
 
 local function promptSwitchDrive(code)
@@ -187,8 +217,9 @@ local function setupOwnerInline(config, map, code)
         return false
     end
     local controller, receiverName = promptSwitchDrive(code)
+    local indicator = promptSwitchIndicator(map, code)
     map.switches[code] = {
-        redstoneIO = rioAddress, side = side, color = color,
+        redstoneIO = rioAddress, side = side, color = color, indicator = indicator,
         controller = controller, receiverName = receiverName,
     }
     return true
@@ -225,16 +256,21 @@ local function setupSwitches(config, map)
             end
 
             local controller, receiverName = promptSwitchDrive(code)
+            -- Own indicator regardless of leverOwner -- indicators are per-switch, never shared
+            -- (see componentmap.lua's schema comment).
+            local indicator = promptSwitchIndicator(map, code)
 
             local choice = cli.reviewChoice({
                 "Výhybka " .. code .. ":",
                 leverOwner and ("  páčka: sdílená s výhybkou " .. leverOwner)
                     or ("  páčka: " .. tostring(rioAddress) .. " / " .. tostring(side) .. " / " .. tostring(color)),
                 "  pohon: " .. tostring(controller) .. " / receiver '" .. tostring(receiverName) .. "'",
+                indicator and ("  kontrolka: " .. indicator.redstoneIO .. " / " .. indicator.side .. " / " .. indicator.color)
+                    or "  kontrolka: (nenamapováno)",
             })
             if choice == "save" then
                 map.switches[code] = {
-                    redstoneIO = rioAddress, side = side, color = color, leverOwner = leverOwner,
+                    redstoneIO = rioAddress, side = side, color = color, leverOwner = leverOwner, indicator = indicator,
                     controller = controller, receiverName = receiverName,
                 }
                 break
@@ -391,7 +427,7 @@ local function setupRouteLocks(routesData, map)
             goto continue
         end
         while true do
-            local rioAddress, side, color = promptLever(map, "Redstone I/O pro páčku kolejového závěrníku", nil, r.id)
+            local rioAddress, side, color = promptLever(map, "Redstone I/O pro páčku kolejového závěrníku", "lever", nil, r.id)
             if not rioAddress then
                 io.write("Přeskočeno -- cesta zůstane bez kolejového závěrníku (nepůjde zamknout závěr výměn).\n")
                 break

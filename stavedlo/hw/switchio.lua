@@ -34,7 +34,14 @@ function switchio.sideValue(name)
     return sides[name]
 end
 
--- entry = {redstoneIO = address, side = "north", color = "white"} from componentmap.switches[code]
+-- entry = {redstoneIO = address, side = "north", color = "white"} -- same shape for both the
+-- switch's own lever fields (componentmap.switches[code], passed to readLever) and its
+-- `.indicator` sub-table (passed to setIndicator) -- these must be TWO DIFFERENT entries on two
+-- different (redstoneIO, side, color) triples. Confirmed in practice: reusing one entry for both
+-- readLever and setIndicator lets the indicator's own output feed back into the lever's input
+-- reading and permanently stick it (the switch could be thrown once, then never again, even
+-- across a restart, since the redstone output itself is persisted in the world) -- see
+-- componentmap.lua's schema comment.
 local function proxyAndArgs(entry)
     if not entry or not entry.redstoneIO or not entry.side or not entry.color then
         return nil

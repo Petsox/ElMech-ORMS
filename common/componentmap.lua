@@ -12,9 +12,17 @@ local componentmap = {}
 function componentmap.empty()
     return {
         switches = {},   -- [switchCode] = {redstoneIO=addr, side=str, color=str, controller=addr, receiverName=str,
-                         --   leverOwner=otherSwitchCode}  -- "spojené výhybky": when set, this switch has no lever
-                         --   of its own (redstoneIO/side/color are nil) and shares the named switch's physical
-                         --   lever/indicator; it still has its own controller/receiverName (own motor). leverOwner
+                         --   leverOwner=otherSwitchCode, indicator={redstoneIO=addr, side=str, color=str}}
+                         --   redstoneIO/side/color (top-level) is the PÁČKA (lever, input) on the Control Panel;
+                         --   `indicator` is a SEPARATE bundled-cable address/side/colour for the light Control
+                         --   Panel -- these must not share a (redstoneIO, side, color) triple with the lever, or
+                         --   driving the light's output can feed back into the lever's own input reading and
+                         --   permanently stick it (confirmed in practice: switch moved once, then never again,
+                         --   indicator stuck lit even across a restart, because the redstone output itself
+                         --   persists in the world). leverOwner: "spojené výhybky" -- when set, this switch has no
+                         --   lever of its own (redstoneIO/side/color are nil) and shares the named switch's
+                         --   physical lever; it still has its own controller/receiverName (own motor) AND its own
+                         --   `indicator` (indicators are per-switch, not shared, even when the lever is). leverOwner
                          --   always points at a switch that owns its lever directly (setup.lua flattens chains),
                          --   so resolveLeverEntry below never has to recurse.
         signals = {},     -- [signalName] = {controller=addr, kind="main"|"expect"|"shunting"|"repeater"|"inserted",

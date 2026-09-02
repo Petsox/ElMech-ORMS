@@ -247,14 +247,18 @@ local function pollSwitches()
             elseif lastLever[code] == nil or reading ~= lastLever[code] then
                 if not lock:isSwitchLocked(code) then
                     for _, memberCode in ipairs(componentmap.leverGroup(map, code)) do
-                        local ok, driveErr = switchdrv.setPosition(map.switches[memberCode], reading)
+                        local memberEntry = map.switches[memberCode]
+                        local ok, driveErr = switchdrv.setPosition(memberEntry, reading)
                         if not ok and not reportedLeverErrors["drive:" .. memberCode] then
                             reportedLeverErrors["drive:" .. memberCode] = true
                             io.write("Výhybka " .. memberCode .. ": nelze přestavit motor (" .. tostring(driveErr) .. ") -- zkontroluj digitalUnivController/jméno receiveru.\n")
                         end
+                        -- Each switch has its OWN indicator light (never the lever's
+                        -- redstoneIO/side/color -- see componentmap.lua's schema comment on why
+                        -- reusing that would stick the lever reading permanently).
+                        switchio.setIndicator(memberEntry.indicator, reading)
                         lastLever[memberCode] = reading
                     end
-                    switchio.setIndicator(entry, reading)
                 end
             end
         end
