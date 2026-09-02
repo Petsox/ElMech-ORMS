@@ -1,9 +1,13 @@
 -- Setup wizard for the Dopravní kancelář computer. DK never touches switches/signals/crossings
--- directly (that's all stavedlo/setup.lua), so this only needs: the same signal classification
--- pass as stavedlo (to compute the identical routes.json locally -- see the note in the design
--- plan about each computer owning its files independently, no file transfer needed since both
--- start from the same layout file), DK's own local hradlo/lock clonky (mirroring network state),
--- and the peer address of the stavedlo computer.
+-- directly (that's all stavedlo/setup.lua), so this only needs: the same signal classification +
+-- traťová kolej grouping pass as stavedlo (to compute the identical routes.json locally -- see
+-- the note in the design plan about each computer owning its files independently, no file
+-- transfer needed since both start from the same layout file), DK's own local hradlo/lock clonky
+-- (mirroring network state), and the peer address of the stavedlo computer.
+--
+-- Auto-detection: once a clonka name is chosen, the wizard searches every Digital Controller Box
+-- for one that already reports that name paired and uses it without asking (see
+-- componentmap.findByPairedName) -- only falls back to a manual picker if nothing matches.
 local component = require("component")
 local filesystem = require("filesystem")
 
@@ -46,15 +50,27 @@ local function pickComponent(componentType, promptText)
     return chosen and chosen.address or nil
 end
 
-local function pickAspect(controllerAddress, purpose)
+local function autoOrPickComponent(componentType, listMethod, wantedName, promptText)
+    local auto = componentmap.findByPairedName(componentType, listMethod, wantedName)
+    if auto then
+        io.write("Nalezeno automaticky: clonka '" .. wantedName .. "' už spárována na " .. auto .. ".\n")
+        return auto
+    end
+    return pickComponent(componentType, promptText)
+end
+
+-- colorKey ("white"/"green"/"red"/"black") supplies the default from lockboxdrv.DEFAULT_ASPECT
+-- (confirmed stable across the user's boxes in-game).
+local function pickAspect(controllerAddress, purpose, colorKey)
     local aspects = lockboxdrv.listAspects(controllerAddress)
     if type(aspects) == "table" and next(aspects) then
-        io.write("Dostupné aspekty (jen orientačně, potvrď/uprav číslo ručně):\n")
+        io.write("Dostupné aspekty (jen orientačně):\n")
         for k, v in pairs(aspects) do
             io.write("  " .. tostring(k) .. " = " .. tostring(v) .. "\n")
         end
     end
-    return tonumber(cli.prompt("Číslo aspektu pro '" .. purpose .. "'"))
+    local default = lockboxdrv.DEFAULT_ASPECT[colorKey]
+    return tonumber(cli.prompt("Číslo aspektu pro '" .. purpose .. "'", default and tostring(default)))
 end
 
 local function classifySignals(config, map)
@@ -65,51 +81,87 @@ local function classifySignals(config, map)
         local suggested = layout.suggestSignalKind(name)
         local existing = map.signals[name] and map.signals[name].kind
         local kind = cli.prompt("Typ pro " .. name .. " (main/expect/shunting/repeater/inserted)", existing or suggested)
-        map.signals[name] = {kind = kind}
+        local runningLine = map.signals[name] and map.signals[name].runningLine
+        map.signals[name] = {kind = kind, runningLine = runningLine}
+    end
+end
+
+-- Must match stavedlo/setup.lua's setupRunningLines exactly, or the two computers compute
+-- different routes.json (different groups/lock counts).
+local function setupRunningLines(config, map)
+    cli.header("Traťové koleje (skupiny závěrů výměn -- stejně jako na stavědle)")
+    local candidates = {}
+    for _, l in ipairs(config.Labels or {}) do
+        if tostring(l[3]):match("^T%d") then
+            candidates[#candidates + 1] = l[3]
+        end
+    end
+
+    for name, entry in pairs(map.signals) do
+        if entry.kind == "main" then
+            io.write("\n--- " .. name .. " ---\n")
+            if entry.runningLine and not cli.confirm("Už má traťovou kolej '" .. entry.runningLine .. "', přemapovat?", false) then
+                goto continue
+            end
+            local chosen
+            if #candidates > 0 then
+                chosen = cli.pick(candidates, function(c) return c end, true)
+            end
+            entry.runningLine = chosen or cli.prompt("Traťová kolej (Label) pro " .. name, entry.runningLine)
+            ::continue::
+        end
     end
 end
 
 local function setupGateClonky(routesData, map)
     cli.header("Clonky návěstního hradla (jen ty viditelné v DK)")
-    for _, entranceName in ipairs((function()
-        local names, seen = {}, {}
-        for _, r in ipairs(routesData.routes) do
-            if not seen[r.entrance] then
-                seen[r.entrance] = true
-                names[#names + 1] = r.entrance
+    local seen = {}
+    for _, r in ipairs(routesData.routes) do
+        if not seen[r.entrance] then
+            seen[r.entrance] = true
+            local entranceName = r.entrance
+            io.write("\n--- Hradlo pro " .. entranceName .. " ---\n")
+            if map.gates[entranceName] and not cli.confirm("Už namapováno, přemapovat?", false) then
+                goto continue
             end
+            local clonkaName = cli.prompt("Jméno clonky hradla (Distant Signal) v DK")
+            local controller = autoOrPickComponent(
+                componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
+                "Digital Controller Box pro clonku hradla " .. entranceName
+            )
+            local normal = pickAspect(controller, "červená / normální", "red")
+            local active = pickAspect(controller, "bílá / aktivní", "white")
+            map.gates[entranceName] = {
+                hradloController = controller, hradloClonkaName = clonkaName,
+                hradloAspects = {normal = normal, active = active},
+            }
+            ::continue::
         end
-        return names
-    end)()) do
-        io.write("\n--- Hradlo pro " .. entranceName .. " ---\n")
-        if map.gates[entranceName] and not cli.confirm("Už namapováno, přemapovat?", false) then
-            goto continue
-        end
-        local controller = pickComponent(componentmap.TYPES.controllerBox, "Digital Controller Box pro clonku hradla " .. entranceName)
-        local clonkaName = cli.prompt("Jméno clonky hradla (Distant Signal) v DK")
-        local normal = pickAspect(controller, "červená / normální")
-        local active = pickAspect(controller, "bílá / aktivní")
-        map.gates[entranceName] = {
-            hradloController = controller, hradloClonkaName = clonkaName,
-            hradloAspects = {normal = normal, active = active},
-        }
-        ::continue::
     end
 end
 
-local function setupLockClonky(lockCount, map)
-    cli.header("Clonky závěru výměn v DK -- " .. lockCount .. " zámek/y")
-    for i = 1, lockCount do
-        local key = tostring(i)
-        io.write("\n--- Zámek #" .. i .. " ---\n")
-        if map.switchlock[key] and not cli.confirm("Už namapováno, přemapovat?", false) then
+-- One clonka per traťová kolej group, matching stavedlo's setupGroupLocks -- also prints which
+-- routes the group covers.
+local function setupGroupLocks(routesData, map)
+    cli.header("Clonky závěru výměn v DK -- " .. #routesData.groups .. " skupina/y")
+    for _, group in ipairs(routesData.groups) do
+        io.write("\n--- Zámek pro " .. group .. " ---\nCesty v této skupině:\n")
+        for _, r in ipairs(routesData.routes) do
+            if r.group == group then
+                io.write("  - " .. r.id .. "\n")
+            end
+        end
+        if map.switchlock[group] and not cli.confirm("Už namapováno, přemapovat?", false) then
             goto continue
         end
-        local controller = pickComponent(componentmap.TYPES.controllerBox, "Digital Controller Box pro clonku závěru #" .. i .. " v DK")
-        local clonkaName = cli.prompt("Jméno spárovaného Distant Signal (clonka) pro zámek #" .. i)
-        local normal = pickAspect(controller, "bílá / volno")
-        local locked = pickAspect(controller, "zelená / uzamčeno")
-        map.switchlock[key] = {controller = controller, clonkaName = clonkaName, aspects = {normal = normal, locked = locked}}
+        local clonkaName = cli.prompt("Jméno spárovaného Distant Signal (clonka) pro zámek " .. group)
+        local controller = autoOrPickComponent(
+            componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
+            "Digital Controller Box pro clonku závěru " .. group .. " v DK"
+        )
+        local normal = pickAspect(controller, "bílá / volno", "white")
+        local locked = pickAspect(controller, "zelená / uzamčeno", "green")
+        map.switchlock[group] = {controller = controller, clonkaName = clonkaName, aspects = {normal = normal, locked = locked}}
         ::continue::
     end
 end
@@ -127,24 +179,26 @@ local function main()
     local map = componentmap.load(MAP_PATH)
 
     classifySignals(config, map)
+    setupRunningLines(config, map)
 
-    local mainSignalNames = {}
+    local mainSignalGroups = {}
     for name, entry in pairs(map.signals) do
-        if entry.kind == "main" then
-            mainSignalNames[#mainSignalNames + 1] = name
+        if entry.kind == "main" and entry.runningLine then
+            mainSignalGroups[name] = entry.runningLine
         end
     end
 
-    io.write("\nPočítám možné vlakové cesty a potřebný počet závěrů výměn...\n")
-    local routesData, err = routes.computeAndSave(config, mainSignalNames, ROUTES_PATH)
+    io.write("\nPočítám možné vlakové cesty...\n")
+    local routesData, err = routes.computeAndSave(config, mainSignalGroups, ROUTES_PATH)
     if not routesData then
         io.write("Chyba při výpočtu cest: " .. tostring(err) .. "\n")
         os.exit(1)
     end
-    io.write("Nalezeno " .. #routesData.routes .. " cest, potřeba " .. routesData.lockCount .. " závěr(ů) výměn.\n")
+    io.write("Nalezeno " .. #routesData.routes .. " cest v " .. #routesData.groups .. " skupinách: "
+        .. table.concat(routesData.groups, ", ") .. "\n")
 
     setupGateClonky(routesData, map)
-    setupLockClonky(routesData.lockCount, map)
+    setupGroupLocks(routesData, map)
     setupNetwork(map)
 
     componentmap.save(MAP_PATH, map)

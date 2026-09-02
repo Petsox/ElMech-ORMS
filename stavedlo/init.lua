@@ -69,6 +69,19 @@ end
 --------------------------------------------------------------------------------
 -- GUI
 
+-- grapes' own double-buffer diffing assumes the physical screen already matches its internal
+-- "blank" state, which is only true right after a fresh OC boot -- restarting the program within
+-- the same session (e.g. after the installer's own shell output) leaves stale text on screen that
+-- grapes never notices needs overwriting. A raw GPU fill bypasses that diffing and forces an
+-- actual blank screen before grapes draws anything.
+do
+    local gpu = component.gpu
+    local w, h = gpu.getResolution()
+    gpu.setBackground(0x000000)
+    gpu.setForeground(0xFFFFFF)
+    gpu.fill(1, 1, w, h, " ")
+end
+
 local workspace = GUI.workspace()
 local GRAY, WHITE, RED, GREEN, YELLOW, BLUE = 0xB2B2B2, 0xFFFFFF, 0xFF4040, 0x40FF40, 0xFFFF40, 0x4090FF
 
@@ -128,7 +141,7 @@ for i, s in ipairs(mainSignals) do
         local ok, err = lock:confirmLock(routeId)
         if ok then
             network.send(map.network.peerAddress, map.network.port, "LOCK_STATE",
-                {routeId = routeId, state = lock:state(routeId), slotIndex = lock:slotIndexFor(routeId)})
+                {routeId = routeId, state = lock:state(routeId), group = lock:groupFor(routeId)})
         else
             io.write("Zámek " .. name .. ": " .. tostring(err) .. "\n")
         end
@@ -182,10 +195,10 @@ local function onNetworkMessage(msgType, payload, senderAddress)
         local route = lock.routesById[payload.routeId]
         local entranceName = route and route.entrance
         local gateInactive = entranceName == nil or not gateCtl:isActive(entranceName)
-        local slotIndex = lock:slotIndexFor(payload.routeId)
+        local group = lock:groupFor(payload.routeId)
         local ok, reason = lock:release(payload.routeId, gateInactive)
         network.send(senderAddress, map.network.port, "LOCK_STATE",
-            {routeId = payload.routeId, state = lock:state(payload.routeId), slotIndex = slotIndex, ok = ok, reason = reason})
+            {routeId = payload.routeId, state = lock:state(payload.routeId), group = group, ok = ok, reason = reason})
     end
 end
 
@@ -223,15 +236,25 @@ end
 -- to every member's own motor (each still has its own controller/receiverName).
 
 local lastLever = {}
+local reportedLeverErrors = {}
 
 local function pollSwitches()
     for code, entry in pairs(map.switches) do
         if not entry.leverOwner then
-            local reading = switchio.readLever(entry)
-            if reading ~= nil and (lastLever[code] == nil or reading ~= lastLever[code]) then
+            local reading, err = switchio.readLever(entry)
+            if reading == nil then
+                if not reportedLeverErrors[code] then
+                    reportedLeverErrors[code] = true
+                    io.write("Výhybka " .. code .. ": nelze přečíst páčku (" .. tostring(err) .. ") -- zkontroluj Redstone I/O/stranu/barvu v setup.lua.\n")
+                end
+            elseif lastLever[code] == nil or reading ~= lastLever[code] then
                 if not lock:isSwitchLocked(code) then
                     for _, memberCode in ipairs(componentmap.leverGroup(map, code)) do
-                        switchdrv.setPosition(map.switches[memberCode], reading)
+                        local ok, driveErr = switchdrv.setPosition(map.switches[memberCode], reading)
+                        if not ok and not reportedLeverErrors["drive:" .. memberCode] then
+                            reportedLeverErrors["drive:" .. memberCode] = true
+                            io.write("Výhybka " .. memberCode .. ": nelze přestavit motor (" .. tostring(driveErr) .. ") -- zkontroluj digitalUnivController/jméno receiveru.\n")
+                        end
                         lastLever[memberCode] = reading
                     end
                     switchio.setIndicator(entry, reading)

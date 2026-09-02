@@ -1,9 +1,12 @@
 -- Enumerates every possible train route across one zhlaví (throat) -- from each confirmed
--- "hlavní" (main, entrance/odjezdové) signal to each labelled station/running track -- and
--- computes how many concurrent, mutually non-conflicting routes the layout allows. That count is
--- how many physical závěr výměn (switch-lock) circuits stavedlo/interlocking/switchlock.lua needs
--- to hand out, matching the rule from the design: "based on the number of running lines, how many
--- train routes can be built at once without them crossing".
+-- "hlavní" (main, entrance/odjezdové) signal to each labelled station/running track.
+--
+-- Lock grouping: one závěr výměn per traťová kolej (running line, e.g. T1/T2/T4), not a
+-- graph-computed "maximum concurrent routes" pool -- confirmed by the user against their real
+-- station design: every route sharing a running line (arrival or departure alike) always
+-- conflicts with every other route on that same line in this kind of throat, so a single shared
+-- lock per line is what a real electromechanical interlocking actually uses. mainSignalGroups
+-- (built by the setup wizard) says which running-line label each hlavní signal belongs to.
 local layout = require("layout")
 local persist = require("persist")
 
@@ -36,30 +39,11 @@ function routes.resolveLabelCell(graph, label, maxRadius)
     return nil
 end
 
--- Two routes conflict if they use any cell in common (a shared switch, crossing or plain track
--- segment) -- either one being built prevents the other from being locked at the same time.
-local function cellSet(result)
-    local set = {}
-    for _, c in ipairs(result.cells) do
-        set[key(c.x, c.y)] = true
-    end
-    return set
-end
-
-local function conflicts(a, b)
-    for k in pairs(a) do
-        if b[k] then
-            return true
-        end
-    end
-    return false
-end
-
 -- mainSignalNames: array of signal names confirmed (by the setup wizard) to be hlavní
 -- (entrance/odjezdové) signals -- routes only start from these, never from předvěsti/posunová
 -- návěstidla. labels: config.Labels array ({x, y, text}, e.g. {45,27,"T4"} or {71,27,"4"}).
 -- Returns an array of route records: {id, entrance, label, cells, switches, crossings,
--- allStraight, cellSet}.
+-- allStraight}.
 function routes.enumerate(graph, mainSignalNames, labels)
     local found = {}
     local seenIds = {}
@@ -84,7 +68,6 @@ function routes.enumerate(graph, mainSignalNames, labels)
                         switches = result.switches,
                         crossings = result.crossings,
                         allStraight = result.allStraight,
-                        cellSet = cellSet(result),
                     }
                 end
             end
@@ -92,70 +75,6 @@ function routes.enumerate(graph, mainSignalNames, labels)
     end
 
     return found
-end
-
--- Maximum set of pairwise non-conflicting routes -- brute-force backtracking with a simple
--- bound-based prune. The number of candidate routes in one zhlaví is small (a few dozen at most),
--- so this stays fast; see common/routes.lua module doc / the design plan for why this is
--- acceptable instead of a polynomial approximation.
-function routes.maxConcurrent(routeList)
-    local n = #routeList
-    if n == 0 then
-        return 0, {}
-    end
-
-    local conflictRow = {}
-    for i = 1, n do
-        conflictRow[i] = {}
-        for j = 1, n do
-            if i ~= j then
-                conflictRow[i][j] = conflicts(routeList[i].cellSet, routeList[j].cellSet)
-            end
-        end
-    end
-
-    local best, bestChosen = 0, {}
-    local chosen = {}
-
-    local function bt(idx, chosenCount)
-        if chosenCount + (n - idx + 1) <= best then
-            return
-        end
-        if idx > n then
-            if chosenCount > best then
-                best = chosenCount
-                bestChosen = {}
-                for i = 1, #chosen do
-                    bestChosen[i] = chosen[i]
-                end
-            end
-            return
-        end
-
-        local canInclude = true
-        for i = 1, #chosen do
-            if conflictRow[idx][chosen[i]] then
-                canInclude = false
-                break
-            end
-        end
-
-        if canInclude then
-            chosen[#chosen + 1] = idx
-            bt(idx + 1, chosenCount + 1)
-            chosen[#chosen] = nil
-        end
-
-        bt(idx + 1, chosenCount)
-    end
-
-    bt(1, 0)
-
-    local names = {}
-    for i = 1, #bestChosen do
-        names[i] = routeList[bestChosen[i]].id
-    end
-    return best, names
 end
 
 -- [switchName] = {default = iconDefault, toggled = iconToggled} -- lets switchlock.lua translate
@@ -169,31 +88,39 @@ local function switchIconTable(config)
     return icons
 end
 
--- Computes routes + lock-count for a zhlaví and persists the result (stripping cellSet, which is
--- only needed for the in-process conflict computation) so stavedlo/dk can load it at boot without
--- recomputing. mainSignalNames/labels come from the setup wizard's confirmed classification.
-function routes.computeAndSave(config, mainSignalNames, path)
+-- Computes routes + running-line groups for a zhlaví and persists the result so stavedlo/dk can
+-- load it at boot without recomputing. mainSignalGroups = {[entranceName] = runningLineLabel}
+-- comes from the setup wizard. A route whose entrance isn't in mainSignalGroups (shouldn't
+-- happen -- mainSignalGroups is built from exactly the confirmed hlavní signals) is dropped
+-- rather than left ungrouped, since an ungrouped route could never be given a lock slot.
+function routes.computeAndSave(config, mainSignalGroups, path)
     local graph = layout.buildGraph(config)
-    local routeList = routes.enumerate(graph, mainSignalNames, config.Labels or {})
-    local lockCount, examplePeak = routes.maxConcurrent(routeList)
 
-    local saved = {
-        lockCount = lockCount,
-        examplePeakRoutes = examplePeak,
-        switchIcons = switchIconTable(config),
-        routes = {},
-    }
-    for _, r in ipairs(routeList) do
-        saved.routes[#saved.routes + 1] = {
-            id = r.id,
-            entrance = r.entrance,
-            label = r.label,
-            cells = r.cells,
-            switches = r.switches,
-            crossings = r.crossings,
-            allStraight = r.allStraight,
-        }
+    local mainSignalNames = {}
+    for name in pairs(mainSignalGroups) do
+        mainSignalNames[#mainSignalNames + 1] = name
     end
+
+    local routeList = routes.enumerate(graph, mainSignalNames, config.Labels or {})
+
+    local groupSet, groups = {}, {}
+    local saved = {switchIcons = switchIconTable(config), routes = {}}
+    for _, r in ipairs(routeList) do
+        local group = mainSignalGroups[r.entrance]
+        if group then
+            if not groupSet[group] then
+                groupSet[group] = true
+                groups[#groups + 1] = group
+            end
+            saved.routes[#saved.routes + 1] = {
+                id = r.id, entrance = r.entrance, label = r.label, group = group,
+                cells = r.cells, switches = r.switches, crossings = r.crossings, allStraight = r.allStraight,
+            }
+        end
+    end
+    table.sort(groups)
+    saved.groups = groups
+    saved.lockCount = #groups
 
     local ok, err = persist.writeJSON(path, saved)
     if not ok then

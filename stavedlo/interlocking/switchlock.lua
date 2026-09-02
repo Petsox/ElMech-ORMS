@@ -1,19 +1,25 @@
--- Závěr výměn: a shared pool of routesData.lockCount lock "slots", sized at setup time (see
--- common/routes.lua) as the largest set of routes that can ever be simultaneously non-conflicting
--- across this zhlaví. Two-phase per route, matching the design's sequence:
---   1. reserve(routeId)     -- návěstní hradlo activation (gate.lua): claims a slot if the route
---                               doesn't conflict with any other currently reserved/locked route.
---                               This is the actual "kolik vlakových cest najednou" conflict check.
---   2. confirmLock(routeId) -- signalista's "uzamčení závěru výměn" button: verifies the physical
---                               switch positions match the route and turns the clonka green /
---                               closes crossings.
+-- Závěr výměn: one lock per traťová kolej (running-line group, e.g. "T1"/"T2"/"T4" -- see
+-- common/routes.lua's grouping), not a generically-sized pool. Two-phase per route, matching the
+-- design's sequence:
+--   1. reserve(routeId)     -- návěstní hradlo activation (gate.lua): claims that route's group's
+--                               lock if it isn't already held by a different route. A defense-in-
+--                               depth cellSet check also runs here in case two groups were ever
+--                               misconfigured to overlap physically.
+--   2. confirmLock(routeId) -- signalista's "uzamčení závěru výměn" button: requires the
+--                               kolejový závěrník lever for this specific route to be engaged
+--                               (the mechanical route-lock the user described -- a signalman
+--                               throws it after setting the switches, and only then may the
+--                               závěr výměn itself be locked), then verifies the physical switch
+--                               positions match the route, and turns the clonka green / closes
+--                               crossings.
 --   3. release(routeId)     -- DK's unlock action, itself only permitted once gate.lua reports
---                               the hradlo already inactive: frees the slot, clonka back to
---                               white, opens crossings.
--- A slot stays held from reserve() through confirmLock() until release() -- hradlo turning off
+--                               the hradlo already inactive: frees the group's lock, clonka back
+--                               to white, opens crossings.
+-- The lock stays held from reserve() through confirmLock() until release() -- hradlo turning off
 -- (step 4/5 of the design) does NOT free it by itself, only the explicit DK unlock does; that is
--- what keeps a conflicting route locked out for the whole time a signalman could still need to
--- re-open the crossing/relock, exactly matching the real electromechanical behaviour.
+-- what keeps a conflicting route on the same line locked out for the whole time a signalman
+-- could still need to re-open the crossing/relock, exactly matching the real electromechanical
+-- behaviour.
 local switchdrv = require("hw.switchdrv")
 local switchio = require("hw.switchio")
 local crossingdrv = require("hw.crossingdrv")
@@ -55,9 +61,8 @@ function switchlock.new(routesData, map)
         self.routesById[r.id] = r
         self.cellSets[r.id] = cellSetOf(r)
     end
-    self.slotCount = routesData.lockCount
-    self.slots = {}          -- [routeId] = {state = "reserved"|"locked", slotIndex = n}
-    self.occupied = {}         -- [slotIndex] = routeId
+    self.slots = {}       -- [routeId] = {state = "reserved"|"locked", group = runningLineLabel}
+    self.occupied = {}      -- [runningLineLabel] = routeId
     return self
 end
 
@@ -66,9 +71,13 @@ function switchlock:state(routeId)
     return s and s.state or "free"
 end
 
-function switchlock:slotIndexFor(routeId)
+function switchlock:groupFor(routeId)
     local s = self.slots[routeId]
-    return s and s.slotIndex or nil
+    if s then
+        return s.group
+    end
+    local route = self.routesById[routeId]
+    return route and route.group or nil
 end
 
 -- Whether switchCode is used by any currently reserved/locked route -- the kolejový závěrník
@@ -89,15 +98,6 @@ function switchlock:isSwitchLocked(switchCode)
     return false
 end
 
-local function firstFreeSlot(self)
-    for i = 1, self.slotCount do
-        if not self.occupied[i] then
-            return i
-        end
-    end
-    return nil
-end
-
 -- Called by gate.lua when a návěstní hradlo activates. Returns ok, reason.
 function switchlock:reserve(routeId)
     local route = self.routesById[routeId]
@@ -107,6 +107,12 @@ function switchlock:reserve(routeId)
     if self.slots[routeId] then
         return false, "already_reserved"
     end
+    if not route.group then
+        return false, "no_group"
+    end
+    if self.occupied[route.group] then
+        return false, "group_busy"
+    end
 
     local mySet = self.cellSets[routeId]
     for otherId in pairs(self.slots) do
@@ -115,13 +121,8 @@ function switchlock:reserve(routeId)
         end
     end
 
-    local slot = firstFreeSlot(self)
-    if not slot then
-        return false, "no_free_lock"
-    end
-
-    self.slots[routeId] = {state = "reserved", slotIndex = slot}
-    self.occupied[slot] = routeId
+    self.slots[routeId] = {state = "reserved", group = route.group}
+    self.occupied[route.group] = routeId
     return true
 end
 
@@ -144,12 +145,20 @@ local function leverMatchesRoute(self, route)
     return true
 end
 
--- Signalista's "uzamčení závěru výměn" button. Requires the route to already be reserved
--- (hradlo active) and every switch it uses to physically sit in the position the route needs.
+-- Signalista's "uzamčení závěru výměn" button. Requires: the route to already be reserved
+-- (hradlo active), its kolejový závěrník lever to be engaged (mechanically confirms this
+-- specific route, not just "some route on this line"), and every switch it uses to physically
+-- sit in the position the route needs.
 function switchlock:confirmLock(routeId)
     local slot = self.slots[routeId]
     if not slot or slot.state ~= "reserved" then
         return false, "not_reserved"
+    end
+
+    local routeLockEntry = self.map.routeLocks[routeId]
+    local engaged = routeLockEntry and switchio.readLever(routeLockEntry)
+    if not engaged then
+        return false, "route_lock_not_engaged"
     end
 
     local route = self.routesById[routeId]
@@ -170,7 +179,7 @@ function switchlock:confirmLock(routeId)
 
     slot.state = "locked"
 
-    local lockEntry = self.map.switchlock[tostring(slot.slotIndex)]
+    local lockEntry = self.map.switchlock[slot.group]
     if lockEntry then
         lockboxdrv.setAspect(lockEntry.controller, lockEntry.clonkaName, lockEntry.aspects.locked)
     end
@@ -195,22 +204,22 @@ function switchlock:release(routeId, gateIsInactive)
         crossingdrv.activate(self.map.crossings[crossingName], crossingName, false)
     end
 
-    local lockEntry = self.map.switchlock[tostring(slot.slotIndex)]
+    local lockEntry = self.map.switchlock[slot.group]
     if lockEntry then
         lockboxdrv.setAspect(lockEntry.controller, lockEntry.clonkaName, lockEntry.aspects.normal)
     end
 
-    self.occupied[slot.slotIndex] = nil
+    self.occupied[slot.group] = nil
     self.slots[routeId] = nil
     return true
 end
 
--- Boot reset: releases every slot unconditionally and drives every configured clonka + crossing
+-- Boot reset: releases every lock unconditionally and drives every configured clonka + crossing
 -- back to its idle state, regardless of in-memory state (which starts empty anyway on a fresh
 -- boot, but the physical world may not).
 function switchlock:reset()
-    for slotIndex = 1, self.slotCount do
-        local lockEntry = self.map.switchlock[tostring(slotIndex)]
+    for _, group in ipairs(self.routesData.groups or {}) do
+        local lockEntry = self.map.switchlock[group]
         if lockEntry then
             lockboxdrv.setAspect(lockEntry.controller, lockEntry.clonkaName, lockEntry.aspects.normal)
         end

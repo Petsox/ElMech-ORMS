@@ -18,9 +18,15 @@ function componentmap.empty()
                          --   always points at a switch that owns its lever directly (setup.lua flattens chains),
                          --   so resolveLeverEntry below never has to recurse.
         signals = {},     -- [signalName] = {controller=addr, kind="main"|"expect"|"shunting"|"repeater"|"inserted",
-                          --   stopState=str, clearStraight=str, clearDiverging=str}  -- last 3 only set for kind=="main"
+                          --   stopState=str, clearStraight=str, clearDiverging=str,  -- last 3 only set for kind=="main"
+                          --   runningLine=str}  -- only set for kind=="main": which traťová kolej (T-label) this
+                          --   entrance/odjezdové signal belongs to -- see common/routes.lua's grouping.
         crossings = {},    -- [crossingName] = {controller=addr}
-        switchlock = {},    -- [slotIndex as string] = {controller=addr, clonkaName=str, aspects={normal=n, locked=n}}
+        switchlock = {},    -- [runningLineLabel] = {controller=addr, clonkaName=str, aspects={normal=n, locked=n}}
+                            --   one entry per routes.json group (e.g. "T1"/"T2"/"T4"), not per route.
+        routeLocks = {},      -- [routeId] = {redstoneIO=addr, side=str, color=str}  -- kolejový závěrník: a
+                              --   Control Panel lever (input only, no motor/indicator) that must be engaged before
+                              --   switchlock:confirmLock will lock that specific route's závěr výměn.
         gates = {},          -- [entranceSignalName] = {
                              --   hradloController=addr, hradloClonkaName=str, hradloAspects={normal=n, active=n},
                              --   zarazkaController=addr, zarazkaClonkaName=str, zarazkaAspects={normal=n, active=n},
@@ -86,7 +92,9 @@ end
 -- Every switch code that shares a physical lever with `code` (code itself and, transitively via
 -- resolveLeverEntry's owner, every other switch pointing at the same owner) -- used to keep
 -- kolejový závěrník locking in sync across a spojená výhybka: locking one member must lock all of
--- them, since moving the shared lever would move every motor on it at once.
+-- them, since moving the shared lever would move every motor on it at once. (Different concept
+-- from map.routeLocks -- this is about switches sharing one Control Panel lever, that's a
+-- separate per-route mechanical lock lever.)
 function componentmap.leverGroup(map, code)
     local ownerEntry = componentmap.resolveLeverEntry(map, code)
     if not ownerEntry then
@@ -101,6 +109,31 @@ function componentmap.leverGroup(map, code)
         end
     end
     return group
+end
+
+-- Auto-detection (requested after the user found manual re-entry tedious in practice): searches
+-- every component of componentType for one whose `listMethod` callback (e.g. "getReceiverNames",
+-- "getSignalNames") already reports wantedName among its paired names, and returns that
+-- component's address -- or nil if wantedName isn't paired anywhere yet, in which case the
+-- caller should fall back to the manual picker. Relies on the user's in-game naming already
+-- matching the layout's own identifiers (switch code, signal name, crossing name, or a
+-- wizard-chosen clonka name) -- exactly the convention the setup wizard now assumes first and
+-- only asks about manually when nothing matches.
+function componentmap.findByPairedName(componentType, listMethod, wantedName)
+    for address in component.list(componentType, true) do
+        local ok, proxy = pcall(component.proxy, address)
+        if ok and proxy[listMethod] then
+            local okList, names = pcall(proxy[listMethod])
+            if okList and type(names) == "table" then
+                for _, n in pairs(names) do
+                    if n == wantedName then
+                        return address
+                    end
+                end
+            end
+        end
+    end
+    return nil
 end
 
 componentmap.TYPES = {

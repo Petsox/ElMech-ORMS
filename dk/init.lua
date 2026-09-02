@@ -61,6 +61,15 @@ end
 --------------------------------------------------------------------------------
 -- GUI
 
+-- See stavedlo/init.lua's comment on why this raw GPU fill runs before grapes draws anything.
+do
+    local gpu = component.gpu
+    local w, h = gpu.getResolution()
+    gpu.setBackground(0x000000)
+    gpu.setForeground(0xFFFFFF)
+    gpu.fill(1, 1, w, h, " ")
+end
+
 local workspace = GUI.workspace()
 local GRAY, WHITE, RED, GREEN, YELLOW, BLUE = 0xB2B2B2, 0xFFFFFF, 0xFF4040, 0x40FF40, 0xFFFF40, 0x4090FF
 
@@ -163,13 +172,13 @@ local function driveGateClonka(entranceName, active)
     lockboxdrv.setAspect(entry.hradloController, entry.hradloClonkaName, active and entry.hradloAspects.active or entry.hradloAspects.normal)
 end
 
--- slotIndex is assigned by stavedlo's switchlock pool and carried in the LOCK_STATE payload
--- (see stavedlo/init.lua) so DK can address its own local copy of that same numbered clonka.
-local function driveLockClonka(slotIndex, state)
-    if not slotIndex then
+-- group (a running-line label like "T4") comes straight from the LOCK_STATE payload (see
+-- stavedlo/init.lua) so DK can address its own local copy of that same line's clonka.
+local function driveLockClonka(group, state)
+    if not group then
         return
     end
-    local entry = map.switchlock[tostring(slotIndex)]
+    local entry = map.switchlock[group]
     if not entry then
         return
     end
@@ -189,7 +198,7 @@ local function onNetworkMessage(msgType, payload, senderAddress)
         end
     elseif msgType == "LOCK_STATE" then
         rsel:onLockState(payload.routeId, payload.state)
-        driveLockClonka(payload.slotIndex, payload.state)
+        driveLockClonka(payload.group, payload.state)
         if payload.state == "free" then
             for name, id in pairs(rsel.activeRouteByEntrance) do
                 if id == payload.routeId then

@@ -1,8 +1,16 @@
 -- One-time (re-runnable) setup wizard for the Stavědlo computer: walks the layout, lets the
 -- user manually wire every switch/signal/crossing/gate/lock-clonka to an OpenComputers component
--- address, confirms signal classification, computes routes.json (route enumeration + závěr
--- výměn lock count -- see common/routes.lua) and saves everything under /home/stavedlo/data/.
+-- address, confirms signal classification, computes routes.json (route enumeration + traťová
+-- kolej grouping -- see common/routes.lua) and saves everything under /home/stavedlo/data/.
 -- See common/cli.lua's doc comment for why this is a term wizard rather than a grapes GUI one.
+--
+-- Auto-detection: for every entity whose name is already known from the layout (switch code,
+-- signal name, crossing name) or chosen earlier in this same run (a clonka name), the wizard
+-- first searches all components of the right type for one that already reports that name among
+-- its paired receivers/signals (component.getReceiverNames()/getSignalNames()) and uses it
+-- without asking, only falling back to the manual picker when nothing matches. This assumes the
+-- user names things in-game to match the layout/clonka names -- if that's not the convention for
+-- some entity, the manual fallback still lets it be named/picked freely.
 local component = require("component")
 local filesystem = require("filesystem")
 
@@ -12,7 +20,6 @@ local routes = require("routes")
 local componentmap = require("componentmap")
 local network = require("network")
 local lockboxdrv = require("hw.lockboxdrv")
-local signaldrv = require("hw.signaldrv")
 local switchio = require("hw.switchio")
 
 local DATA_DIR = "/home/stavedlo/data"
@@ -49,15 +56,29 @@ local function pickComponent(componentType, promptText)
     return chosen and chosen.address or nil
 end
 
-local function pickAspect(controllerAddress, purpose)
+-- Tries auto-detection first (see module doc comment), falls back to pickComponent.
+local function autoOrPickComponent(componentType, listMethod, wantedName, promptText, entityLabel)
+    local auto = componentmap.findByPairedName(componentType, listMethod, wantedName)
+    if auto then
+        io.write("Nalezeno automaticky: " .. entityLabel .. " '" .. wantedName .. "' už spárováno na " .. auto .. ".\n")
+        return auto
+    end
+    return pickComponent(componentType, promptText)
+end
+
+-- colorKey ("white"/"green"/"red"/"black") supplies the default from lockboxdrv.DEFAULT_ASPECT
+-- (confirmed stable across the user's boxes in-game), so this is normally just Enter-to-accept
+-- rather than typing a number blind; still shows the live aspects list and allows overriding it.
+local function pickAspect(controllerAddress, purpose, colorKey)
     local aspects = lockboxdrv.listAspects(controllerAddress)
     if type(aspects) == "table" and next(aspects) then
-        io.write("Dostupné aspekty (jen orientačně, potvrď/uprav číslo ručně):\n")
+        io.write("Dostupné aspekty (jen orientačně):\n")
         for k, v in pairs(aspects) do
             io.write("  " .. tostring(k) .. " = " .. tostring(v) .. "\n")
         end
     end
-    local raw = cli.prompt("Číslo aspektu pro '" .. purpose .. "'")
+    local default = lockboxdrv.DEFAULT_ASPECT[colorKey]
+    local raw = cli.prompt("Číslo aspektu pro '" .. purpose .. "'", default and tostring(default))
     return tonumber(raw)
 end
 
@@ -96,8 +117,13 @@ local function promptSwitchLever()
 end
 
 local function promptSwitchDrive(code)
-    local controller = pickComponent(componentmap.TYPES.universalController, "digitalUnivController pro pohon výhybky")
-    local receiverName = cli.prompt("Jméno Universal Receiveru (v SignalCraft) pro výhybku " .. code)
+    local controller = componentmap.findByPairedName(componentmap.TYPES.universalController, "getReceiverNames", code)
+    if controller then
+        io.write("Nalezeno automaticky: výhybka '" .. code .. "' už spárována na " .. controller .. ".\n")
+        return controller, code
+    end
+    controller = pickComponent(componentmap.TYPES.universalController, "digitalUnivController pro pohon výhybky")
+    local receiverName = cli.prompt("Jméno Universal Receiveru (v SignalCraft) pro výhybku " .. code, code)
     return controller, receiverName
 end
 
@@ -182,28 +208,44 @@ local function setupSignals(config, map)
         io.write("Odhad typu (dle jména): " .. suggested .. "\n")
         local kind = cli.prompt("Typ (main/expect/shunting/repeater/inserted)", suggested)
 
-        local controller = pickComponent(componentmap.TYPES.signalController, "digitalController obsluhující toto návěstidlo")
+        local controller = autoOrPickComponent(
+            componentmap.TYPES.signalController, "getSignalNames", name,
+            "digitalController obsluhující toto návěstidlo", "návěstidlo"
+        )
 
         local stopState, clearStraight, clearDiverging = nil, nil, nil
+        local runningLine = existing and existing.runningLine or nil
         if kind == "main" and controller then
+            local stateList = {}
             local ok, proxy = pcall(component.proxy, controller)
             if ok then
                 local okStates, states = pcall(proxy.getValidStatesForSignal, name)
                 if okStates and type(states) == "table" then
-                    io.write("Platné stavy pro " .. name .. ":\n")
                     for _, st in pairs(states) do
-                        io.write("  " .. tostring(st) .. "\n")
+                        stateList[#stateList + 1] = st
                     end
                 end
             end
-            stopState = cli.prompt("Název stavu 'Stůj' pro toto návěstidlo")
-            clearStraight = cli.prompt("Název stavu pro 'volno, přímý směr' (Route.allStraight = true)")
-            clearDiverging = cli.prompt("Název stavu pro 'volno, odbočka' (Route.allStraight = false)", clearStraight)
+
+            if #stateList > 0 then
+                io.write("Vyber stav 'Stůj' (Enter/0 pro ruční zadání):\n")
+                stopState = cli.pick(stateList, function(s) return s end, true)
+                io.write("Vyber stav 'Volno' pro přímý směr:\n")
+                clearStraight = cli.pick(stateList, function(s) return s end, true)
+                io.write("Vyber stav 'Volno' pro odbočku (přeskoč pro stejný jako přímý):\n")
+                clearDiverging = cli.pick(stateList, function(s) return s end, true) or clearStraight
+            else
+                io.write("Nepodařilo se živě zjistit platné stavy -- zadej ručně.\n")
+            end
+
+            stopState = stopState or cli.prompt("Název stavu 'Stůj' pro toto návěstidlo")
+            clearStraight = clearStraight or cli.prompt("Název stavu pro 'volno, přímý směr' (Route.allStraight = true)")
+            clearDiverging = clearDiverging or cli.prompt("Název stavu pro 'volno, odbočka' (Route.allStraight = false)", clearStraight)
         end
 
         map.signals[name] = {
             controller = controller, kind = kind, stopState = stopState,
-            clearStraight = clearStraight, clearDiverging = clearDiverging,
+            clearStraight = clearStraight, clearDiverging = clearDiverging, runningLine = runningLine,
         }
         ::continue::
     end
@@ -217,25 +259,88 @@ local function setupCrossings(config, map)
         if map.crossings[name] and not cli.confirm("Už namapováno, přemapovat?", false) then
             goto continue
         end
-        local controller = pickComponent(componentmap.TYPES.crossingController, "digitalCrossController obsluhující tento přejezd")
+        local controller = autoOrPickComponent(
+            componentmap.TYPES.crossingController, "getReceiverNames", name,
+            "digitalCrossController obsluhující tento přejezd", "přejezd"
+        )
         map.crossings[name] = {controller = controller}
         ::continue::
     end
 end
 
-local function setupSwitchLocks(lockCount, map)
-    cli.header("Závěr výměn -- " .. lockCount .. " zámek/y potřeba (dle výpočtu z routes.lua)")
-    for i = 1, lockCount do
-        local key = tostring(i)
-        io.write("\n--- Zámek #" .. i .. " ---\n")
-        if map.switchlock[key] and not cli.confirm("Už namapováno, přemapovat?", false) then
+-- Which traťová kolej (running line, e.g. "T1"/"T2"/"T4") each main signal belongs to -- decides
+-- routes.lua's lock grouping (one závěr výměn per line, confirmed by the user against their real
+-- station design). Offered from the layout's own T-prefixed Labels when present.
+local function setupRunningLines(config, map)
+    cli.header("Traťové koleje (skupiny závěrů výměn)")
+    local candidates = {}
+    for _, l in ipairs(config.Labels or {}) do
+        if tostring(l[3]):match("^T%d") then
+            candidates[#candidates + 1] = l[3]
+        end
+    end
+
+    for name, entry in pairs(map.signals) do
+        if entry.kind == "main" then
+            io.write("\n--- " .. name .. " ---\n")
+            if entry.runningLine and not cli.confirm("Už má traťovou kolej '" .. entry.runningLine .. "', přemapovat?", false) then
+                goto continue
+            end
+            local chosen
+            if #candidates > 0 then
+                chosen = cli.pick(candidates, function(c) return c end, true)
+            end
+            entry.runningLine = chosen or cli.prompt("Traťová kolej (Label) pro " .. name, entry.runningLine)
+            ::continue::
+        end
+    end
+end
+
+-- One clonka per traťová kolej group (not per route) -- addresses request to show which routes a
+-- given lock actually serves before asking to map it.
+local function setupGroupLocks(routesData, map)
+    cli.header("Závěr výměn -- " .. #routesData.groups .. " skupina/y (podle traťových kolejí)")
+    for _, group in ipairs(routesData.groups) do
+        io.write("\n--- Zámek pro " .. group .. " ---\nCesty v této skupině:\n")
+        for _, r in ipairs(routesData.routes) do
+            if r.group == group then
+                io.write("  - " .. r.id .. "\n")
+            end
+        end
+        if map.switchlock[group] and not cli.confirm("Už namapováno, přemapovat?", false) then
             goto continue
         end
-        local controller = pickComponent(componentmap.TYPES.controllerBox, "Digital Controller Box pro clonku závěru #" .. i)
-        local clonkaName = cli.prompt("Jméno spárovaného Distant Signal (clonka) pro zámek #" .. i)
-        local normal = pickAspect(controller, "bílá / volno")
-        local locked = pickAspect(controller, "zelená / uzamčeno")
-        map.switchlock[key] = {controller = controller, clonkaName = clonkaName, aspects = {normal = normal, locked = locked}}
+        local clonkaName = cli.prompt("Jméno spárovaného Distant Signal (clonka) pro zámek " .. group)
+        local controller = autoOrPickComponent(
+            componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
+            "Digital Controller Box pro clonku závěru " .. group, "clonka"
+        )
+        local normal = pickAspect(controller, "bílá / volno", "white")
+        local locked = pickAspect(controller, "zelená / uzamčeno", "green")
+        map.switchlock[group] = {controller = controller, clonkaName = clonkaName, aspects = {normal = normal, locked = locked}}
+        ::continue::
+    end
+end
+
+-- Kolejový závěrník: a real mechanical route-lock lever per route (not per group) -- signalista
+-- must engage it (after setting the switches) before switchlock:confirmLock will lock the
+-- závěr výměn for that specific route. Input-only, reuses hw/switchio.lua's generic bundled-cable
+-- lever reading (no motor/indicator needed here, unlike a switch).
+local function setupRouteLocks(routesData, map)
+    cli.header("Kolejové závěrníky (páčka na Control Panelu pro každou vlakovou cestu)")
+    for _, r in ipairs(routesData.routes) do
+        io.write("\n--- Kolejový závěrník pro cestu " .. r.id .. " (skupina " .. tostring(r.group) .. ") ---\n")
+        if map.routeLocks[r.id] and not cli.confirm("Už namapováno, přemapovat?", false) then
+            goto continue
+        end
+        local rioAddress = pickComponent(componentmap.TYPES.redstone, "Redstone I/O pro páčku kolejového závěrníku")
+        if not rioAddress then
+            io.write("Přeskočeno -- cesta zůstane bez kolejového závěrníku (nepůjde zamknout závěr výměn).\n")
+            goto continue
+        end
+        local side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
+        local color = cli.pick(switchio.COLOR_NAMES, function(n) return n end)
+        map.routeLocks[r.id] = {redstoneIO = rioAddress, side = side, color = color}
         ::continue::
     end
 end
@@ -250,15 +355,21 @@ local function setupGates(config, map)
                 goto continue
             end
 
-            local hradloController = pickComponent(componentmap.TYPES.controllerBox, "Digital Controller Box pro clonku hradla " .. name)
             local hradloClonkaName = cli.prompt("Jméno clonky hradla (Distant Signal)")
-            local hradloNormal = pickAspect(hradloController, "červená / normální")
-            local hradloActive = pickAspect(hradloController, "bílá / aktivní")
+            local hradloController = autoOrPickComponent(
+                componentmap.TYPES.controllerBox, "getSignalNames", hradloClonkaName,
+                "Digital Controller Box pro clonku hradla " .. name, "clonka"
+            )
+            local hradloNormal = pickAspect(hradloController, "červená / normální", "red")
+            local hradloActive = pickAspect(hradloController, "bílá / aktivní", "white")
 
-            local zarazkaController = pickComponent(componentmap.TYPES.controllerBox, "Digital Controller Box pro clonku hradlové zarážky " .. name)
             local zarazkaClonkaName = cli.prompt("Jméno clonky hradlové zarážky (Distant Signal)")
-            local zarazkaNormal = pickAspect(zarazkaController, "černá / normální")
-            local zarazkaActive = pickAspect(zarazkaController, "bílá / aktivní")
+            local zarazkaController = autoOrPickComponent(
+                componentmap.TYPES.controllerBox, "getSignalNames", zarazkaClonkaName,
+                "Digital Controller Box pro clonku hradlové zarážky " .. name, "clonka"
+            )
+            local zarazkaNormal = pickAspect(zarazkaController, "černá / normální", "black")
+            local zarazkaActive = pickAspect(zarazkaController, "bílá / aktivní", "white")
 
             local detectorAddress = pickComponent(componentmap.TYPES.detector, "Digital Detector pro hradlovou zarážku " .. name)
 
@@ -289,23 +400,26 @@ local function main()
     setupSwitches(config, map)
     setupSignals(config, map)
     setupCrossings(config, map)
+    setupRunningLines(config, map)
 
-    local mainSignalNames = {}
+    local mainSignalGroups = {}
     for name, entry in pairs(map.signals) do
-        if entry.kind == "main" then
-            mainSignalNames[#mainSignalNames + 1] = name
+        if entry.kind == "main" and entry.runningLine then
+            mainSignalGroups[name] = entry.runningLine
         end
     end
 
-    io.write("\nPočítám možné vlakové cesty a potřebný počet závěrů výměn...\n")
-    local routesData, err = routes.computeAndSave(config, mainSignalNames, ROUTES_PATH)
+    io.write("\nPočítám možné vlakové cesty...\n")
+    local routesData, err = routes.computeAndSave(config, mainSignalGroups, ROUTES_PATH)
     if not routesData then
         io.write("Chyba při výpočtu cest: " .. tostring(err) .. "\n")
         os.exit(1)
     end
-    io.write("Nalezeno " .. #routesData.routes .. " cest, potřeba " .. routesData.lockCount .. " závěr(ů) výměn.\n")
+    io.write("Nalezeno " .. #routesData.routes .. " cest v " .. #routesData.groups .. " skupinách: "
+        .. table.concat(routesData.groups, ", ") .. "\n")
 
-    setupSwitchLocks(routesData.lockCount, map)
+    setupGroupLocks(routesData, map)
+    setupRouteLocks(routesData, map)
     setupGates(config, map)
     setupNetwork(map)
 

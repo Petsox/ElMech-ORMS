@@ -8,6 +8,17 @@ local component = require("component")
 
 local lockboxdrv = {}
 
+-- Confirmed by the user in-game across their Distant Signal boxes: these ordinals are stable
+-- regardless of which specific clonka/controller they belong to. Used as the setup wizard's
+-- default so it no longer has to ask for a number blind; still overridable per clonka in case a
+-- particular box turns out to differ.
+lockboxdrv.DEFAULT_ASPECT = {
+    green = 1,
+    red = 5,
+    black = 6,
+    white = 7,
+}
+
 function lockboxdrv.setAspect(controllerAddress, clonkaName, aspect)
     if not controllerAddress or not clonkaName or aspect == nil then
         return false, "unmapped"
