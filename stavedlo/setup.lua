@@ -450,33 +450,89 @@ end
 -- against a real station, since throwing it locks the same switches regardless of travel
 -- direction. Input-only, reuses hw/switchio.lua's generic bundled-cable lever reading (no
 -- motor/indicator needed here, unlike a switch).
+--
+-- All the levers for these live on one shared bundled-cable Control Panel, so picking a colour
+-- one at a time (like a switch lever, which each has its own reason to pick a specific panel) is
+-- just tedious busywork here -- confirmed by the user, who asked for auto-assignment instead. So
+-- this asks for the Redstone I/O + side ONCE, then walks routeLockGroups in a stable (sorted)
+-- order auto-picking the next free colour for each, and prints the resulting colour -> routes
+-- table at the end so the user can wire the physical panel from that.
 local function setupRouteLocks(routesData, map)
     cli.header("Kolejové závěrníky (páčka na Control Panelu, sdílená mezi vjezdem a odjezdem po stejné cestě)")
-    for lockId, routeIds in pairs(routesData.routeLockGroups) do
-        io.write("\n--- Kolejový závěrník " .. lockId .. " ---\nPoužívají cesty:\n")
-        for _, rid in ipairs(routeIds) do
-            io.write("  - " .. rid .. "\n")
+
+    local lockIds = {}
+    for lockId in pairs(routesData.routeLockGroups) do
+        lockIds[#lockIds + 1] = lockId
+    end
+    table.sort(lockIds)
+
+    if #lockIds == 0 then
+        io.write("Žádné kolejové závěrníky (žádná cesta nepoužívá výhybky).\n")
+        return
+    end
+
+    local alreadyMapped = 0
+    for _, lockId in ipairs(lockIds) do
+        if map.routeLocks[lockId] then
+            alreadyMapped = alreadyMapped + 1
         end
-        if map.routeLocks[lockId] and not cli.confirm("Už namapováno, přemapovat?", false) then
-            goto continue
+    end
+
+    local remapAll = false
+    if alreadyMapped > 0 then
+        remapAll = cli.confirm(
+            alreadyMapped .. " z " .. #lockIds .. " kolejových závěrníků už je namapováno. Přemapovat úplně všechny znovu (nová adresa/strana)?",
+            false
+        )
+        if remapAll then
+            for _, lockId in ipairs(lockIds) do
+                map.routeLocks[lockId] = nil
+            end
         end
-        while true do
-            local rioAddress, side, color = promptLever(map, "Redstone I/O pro páčku kolejového závěrníku " .. lockId, "lever", nil, lockId)
-            if not rioAddress then
-                io.write("Přeskočeno -- cesty zůstanou bez kolejového závěrníku (nepůjde zamknout závěr výměn).\n")
+    end
+
+    local toAssign = {}
+    for _, lockId in ipairs(lockIds) do
+        if remapAll or not map.routeLocks[lockId] then
+            toAssign[#toAssign + 1] = lockId
+        end
+    end
+
+    if #toAssign == 0 then
+        io.write("Všechny kolejové závěrníky už jsou namapované, nic k udělání.\n")
+        return
+    end
+
+    io.write("Zbývá namapovat " .. #toAssign .. " kolejových závěrníků. Vyber JEDNU Redstone I/O + stranu -- barvy se přiřadí automaticky popořadě.\n")
+    local rioAddress = pickComponent(componentmap.TYPES.redstone, "Redstone I/O pro páčky kolejových závěrníků")
+    if not rioAddress then
+        io.write("Přeskočeno -- kolejové závěrníky zůstanou bez namapování (nepůjde zamknout závěr výměn).\n")
+        return
+    end
+    local side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
+
+    local assigned = {}
+    for _, lockId in ipairs(toAssign) do
+        local used = usedColorsFor(map, rioAddress, side, "lever", nil, lockId)
+        local color
+        for _, c in ipairs(switchio.COLOR_NAMES) do
+            if not used[c] then
+                color = c
                 break
             end
-            local choice = cli.reviewChoice({
-                "Kolejový závěrník " .. lockId .. ": " .. rioAddress .. " / " .. side .. " / " .. color,
-            })
-            if choice == "save" then
-                map.routeLocks[lockId] = {redstoneIO = rioAddress, side = side, color = color}
-                break
-            elseif choice == "skip" then
-                break
-            end
         end
-        ::continue::
+        if not color then
+            io.write("Došly barvy na " .. rioAddress .. " (" .. side .. ") -- '" .. lockId .. "' a další zůstávají nenamapované. Spusť tuto sekci znovu s jinou stranou/adresou pro zbytek.\n")
+            break
+        end
+        map.routeLocks[lockId] = {redstoneIO = rioAddress, side = side, color = color}
+        assigned[#assigned + 1] = lockId
+    end
+
+    io.write("\nPřiřazené kolejové závěrníky na " .. rioAddress .. " (" .. side .. "):\n")
+    for _, lockId in ipairs(assigned) do
+        local entry = map.routeLocks[lockId]
+        io.write("  " .. entry.color .. " -- cesty: " .. table.concat(routesData.routeLockGroups[lockId], ", ") .. "\n")
     end
 end
 
