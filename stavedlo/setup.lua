@@ -451,88 +451,109 @@ end
 -- direction. Input-only, reuses hw/switchio.lua's generic bundled-cable lever reading (no
 -- motor/indicator needed here, unlike a switch).
 --
--- All the levers for these live on one shared bundled-cable Control Panel, so picking a colour
--- one at a time (like a switch lever, which each has its own reason to pick a specific panel) is
--- just tedious busywork here -- confirmed by the user, who asked for auto-assignment instead. So
--- this asks for the Redstone I/O + side ONCE, then walks routeLockGroups in a stable (sorted)
--- order auto-picking the next free colour for each, and prints the resulting colour -> routes
--- table at the end so the user can wire the physical panel from that.
+-- All the levers for one traťová kolej group live on their own shared bundled-cable Control
+-- Panel, so picking a colour one at a time (like a switch lever, which each has its own reason to
+-- pick a specific panel) is just tedious busywork here -- confirmed by the user, who asked for
+-- auto-assignment instead, one Redstone I/O + side prompt PER GROUP (matching setupGroupLocks'/
+-- setupGateClonky's grouping, so e.g. 3 traťové koleje means 3 prompts, not 1 or one-per-lockId).
+-- Within each group it walks that group's routeLockIds in a stable (sorted) order auto-picking
+-- the next free colour for each, and prints the resulting colour -> routes table so the user can
+-- wire the physical panel from that.
 local function setupRouteLocks(routesData, map)
     cli.header("Kolejové závěrníky (páčka na Control Panelu, sdílená mezi vjezdem a odjezdem po stejné cestě)")
 
-    local lockIds = {}
-    for lockId in pairs(routesData.routeLockGroups) do
-        lockIds[#lockIds + 1] = lockId
+    -- A routeLockId's routes always share one traťová kolej group in practice -- routes only end
+    -- up sharing a lockId when they run over the exact same switch positions (see
+    -- common/routes.lua's switchesKey), which only happens for routes on the same physical line --
+    -- so any one of its routes' .group is authoritative for the whole lockId.
+    local groupOfLockId = {}
+    for _, r in ipairs(routesData.routes) do
+        groupOfLockId[r.routeLockId] = r.group
     end
-    table.sort(lockIds)
 
-    if #lockIds == 0 then
+    local lockIdsByGroup = {}
+    for lockId in pairs(routesData.routeLockGroups) do
+        local group = groupOfLockId[lockId]
+        lockIdsByGroup[group] = lockIdsByGroup[group] or {}
+        table.insert(lockIdsByGroup[group], lockId)
+    end
+
+    if next(lockIdsByGroup) == nil then
         io.write("Žádné kolejové závěrníky (žádná cesta nepoužívá výhybky).\n")
         return
     end
 
-    local alreadyMapped = 0
-    for _, lockId in ipairs(lockIds) do
-        if map.routeLocks[lockId] then
-            alreadyMapped = alreadyMapped + 1
-        end
-    end
+    for _, group in ipairs(routesData.groups) do
+        local lockIds = lockIdsByGroup[group]
+        if lockIds and #lockIds > 0 then
+            table.sort(lockIds)
+            io.write("\n--- Kolejové závěrníky pro " .. group .. " (" .. #lockIds .. ") ---\n")
 
-    local remapAll = false
-    if alreadyMapped > 0 then
-        remapAll = cli.confirm(
-            alreadyMapped .. " z " .. #lockIds .. " kolejových závěrníků už je namapováno. Přemapovat úplně všechny znovu (nová adresa/strana)?",
-            false
-        )
-        if remapAll then
+            local alreadyMapped = 0
             for _, lockId in ipairs(lockIds) do
-                map.routeLocks[lockId] = nil
+                if map.routeLocks[lockId] then
+                    alreadyMapped = alreadyMapped + 1
+                end
             end
-        end
-    end
 
-    local toAssign = {}
-    for _, lockId in ipairs(lockIds) do
-        if remapAll or not map.routeLocks[lockId] then
-            toAssign[#toAssign + 1] = lockId
-        end
-    end
-
-    if #toAssign == 0 then
-        io.write("Všechny kolejové závěrníky už jsou namapované, nic k udělání.\n")
-        return
-    end
-
-    io.write("Zbývá namapovat " .. #toAssign .. " kolejových závěrníků. Vyber JEDNU Redstone I/O + stranu -- barvy se přiřadí automaticky popořadě.\n")
-    local rioAddress = pickComponent(componentmap.TYPES.redstone, "Redstone I/O pro páčky kolejových závěrníků")
-    if not rioAddress then
-        io.write("Přeskočeno -- kolejové závěrníky zůstanou bez namapování (nepůjde zamknout závěr výměn).\n")
-        return
-    end
-    local side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
-
-    local assigned = {}
-    for _, lockId in ipairs(toAssign) do
-        local used = usedColorsFor(map, rioAddress, side, "lever", nil, lockId)
-        local color
-        for _, c in ipairs(switchio.COLOR_NAMES) do
-            if not used[c] then
-                color = c
-                break
+            local remapAll = false
+            if alreadyMapped > 0 then
+                remapAll = cli.confirm(
+                    alreadyMapped .. " z " .. #lockIds .. " v " .. group .. " už je namapováno. Přemapovat úplně všechny v této skupině znovu (nová adresa/strana)?",
+                    false
+                )
+                if remapAll then
+                    for _, lockId in ipairs(lockIds) do
+                        map.routeLocks[lockId] = nil
+                    end
+                end
             end
-        end
-        if not color then
-            io.write("Došly barvy na " .. rioAddress .. " (" .. side .. ") -- '" .. lockId .. "' a další zůstávají nenamapované. Spusť tuto sekci znovu s jinou stranou/adresou pro zbytek.\n")
-            break
-        end
-        map.routeLocks[lockId] = {redstoneIO = rioAddress, side = side, color = color}
-        assigned[#assigned + 1] = lockId
-    end
 
-    io.write("\nPřiřazené kolejové závěrníky na " .. rioAddress .. " (" .. side .. "):\n")
-    for _, lockId in ipairs(assigned) do
-        local entry = map.routeLocks[lockId]
-        io.write("  " .. entry.color .. " -- cesty: " .. table.concat(routesData.routeLockGroups[lockId], ", ") .. "\n")
+            local toAssign = {}
+            for _, lockId in ipairs(lockIds) do
+                if remapAll or not map.routeLocks[lockId] then
+                    toAssign[#toAssign + 1] = lockId
+                end
+            end
+
+            if #toAssign == 0 then
+                io.write("Všechny kolejové závěrníky v " .. group .. " už jsou namapované, nic k udělání.\n")
+                goto continueGroup
+            end
+
+            io.write("Zbývá namapovat " .. #toAssign .. " v " .. group .. ". Vyber Redstone I/O + stranu -- barvy se přiřadí automaticky popořadě.\n")
+            local rioAddress = pickComponent(componentmap.TYPES.redstone, "Redstone I/O pro páčky kolejových závěrníků " .. group)
+            if not rioAddress then
+                io.write("Přeskočeno -- kolejové závěrníky v " .. group .. " zůstanou bez namapování (nepůjde zamknout závěr výměn).\n")
+                goto continueGroup
+            end
+            local side = cli.pick(switchio.SIDE_NAMES, function(n) return n end)
+
+            local assigned = {}
+            for _, lockId in ipairs(toAssign) do
+                local used = usedColorsFor(map, rioAddress, side, "lever", nil, lockId)
+                local color
+                for _, c in ipairs(switchio.COLOR_NAMES) do
+                    if not used[c] then
+                        color = c
+                        break
+                    end
+                end
+                if not color then
+                    io.write("Došly barvy na " .. rioAddress .. " (" .. side .. ") -- '" .. lockId .. "' a další v " .. group .. " zůstávají nenamapované. Spusť tuto sekci znovu s jinou stranou/adresou pro zbytek.\n")
+                    break
+                end
+                map.routeLocks[lockId] = {redstoneIO = rioAddress, side = side, color = color}
+                assigned[#assigned + 1] = lockId
+            end
+
+            io.write("\nPřiřazené kolejové závěrníky pro " .. group .. " na " .. rioAddress .. " (" .. side .. "):\n")
+            for _, lockId in ipairs(assigned) do
+                local entry = map.routeLocks[lockId]
+                io.write("  " .. entry.color .. " -- cesty: " .. table.concat(routesData.routeLockGroups[lockId], ", ") .. "\n")
+            end
+            ::continueGroup::
+        end
     end
 end
 
