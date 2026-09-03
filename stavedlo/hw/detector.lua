@@ -9,8 +9,9 @@
 local detector = {}
 
 -- onDetect(senderAddress, cartType, entityName) is called whenever any mapped detector fires.
--- Callers filter by senderAddress against componentmap.gates[entranceName].detectorAddress to
--- know which hradlová zarážka the event belongs to.
+-- Callers filter by senderAddress against componentmap.detectors[signalName] to know which
+-- signal's hradlová zarážka the event belongs to (see interlocking/gate.lua's groupForEntrance
+-- for how that resolves to the shared-per-group clonka it actually drives).
 function detector.makeHandler(onDetect)
     return function(e1, e2, e3, e4, e5)
         if e1 == "computer.signal" and e3 == "minecart" then

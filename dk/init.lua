@@ -47,15 +47,23 @@ local function resetClonky()
 end
 resetClonky()
 
-local mainSignalNames = {}
-do
-    local seen = {}
-    for _, r in ipairs(routesData.routes) do
-        if not seen[r.entrance] then
-            seen[r.entrance] = true
-            mainSignalNames[#mainSignalNames + 1] = r.entrance
-        end
+-- Display-only convenience, mirrors stavedlo/init.lua's routeDisplayText: which arrival signal
+-- represents each group, so a departure route reads "6 -> LMol" instead of the raw "S4 -> T4".
+-- Purely cosmetic.
+local arrivalEntranceForGroup = {}
+for name, entry in pairs(map.signals) do
+    if entry.kind == "main" and entry.runningLine then
+        arrivalEntranceForGroup[entry.runningLine] = name
     end
+end
+
+local function routeDisplayText(route)
+    if routesLib.isRunningLineLabel(route.label) then
+        local originTrack = route.entrance:match("^S(%d+)$") or route.entrance
+        local arrivalName = arrivalEntranceForGroup[route.label] or route.label
+        return originTrack .. " -> " .. arrivalName
+    end
+    return route.entrance .. " -> " .. route.label
 end
 
 --------------------------------------------------------------------------------
@@ -120,45 +128,49 @@ for _, l in ipairs(config.Labels or {}) do
     end
 end
 
--- Control panel: one row per hlavní návěstidlo.
+-- Control panel: one row per traťová kolej GROUP -- a hradlo is shared between every arrival and
+-- departure signal on that line (confirmed by the user against the real hradlo count), so what's
+-- actually requested/released is "this group's hradlo", not a specific signal's. Route SELECTION
+-- still happens by clicking individual signals/labels on the diagram above; the row for whichever
+-- group the selected route belongs to is what shows it and sends the request.
 local panelY = 40
-workspace:addChild(GUI.label(1, panelY, workspace.width, 1, WHITE, "Vlakové cesty"))
+workspace:addChild(GUI.label(1, panelY, workspace.width, 1, WHITE, "Vlakové cesty (traťové koleje)"))
 
 local rows = {}
-for i, name in ipairs(mainSignalNames) do
+for i, group in ipairs(routesData.groups) do
     local y = panelY + i
     local row = {}
-    row.nameLabel = workspace:addChild(GUI.label(1, y, 10, 1, WHITE, name))
+    row.nameLabel = workspace:addChild(GUI.label(1, y, 10, 1, WHITE, group))
     row.stateLabel = workspace:addChild(GUI.label(12, y, 30, 1, GRAY, "-"))
     row.hradloBtn = workspace:addChild(GUI.button(44, y, 16, 1, 0x333333, WHITE, 0x555555, WHITE, "Aktivovat hradlo"))
     row.releaseBtn = workspace:addChild(GUI.button(61, y, 16, 1, 0x333333, WHITE, 0x555555, WHITE, "Uvolnit závěr"))
 
     row.hradloBtn.onTouch = function()
-        local routeId = rsel:pendingRouteFor(name)
+        local routeId = rsel:pendingRouteFor(group)
         if not routeId then
-            io.write("Pro " .. name .. " není vybrána žádná cesta (klikni na návěstidlo, pak na cílovou kolej).\n")
+            io.write("Pro " .. group .. " není vybrána žádná cesta (klikni na návěstidlo, pak na cílovou kolej).\n")
             return
         end
-        network.send(map.network.peerAddress, map.network.port, "HRADLO_REQUEST", {entrance = name, routeId = routeId})
-        rsel:markSent(name, routeId)
-        rsel:clearPending(name)
+        network.send(map.network.peerAddress, map.network.port, "HRADLO_REQUEST", {routeId = routeId})
+        rsel:markSent(group, routeId)
+        rsel:clearPending(group)
         workspace:draw()
     end
 
     row.releaseBtn.onTouch = function()
-        local routeId = rsel:activeRouteFor(name)
+        local routeId = rsel:activeRouteFor(group)
         if not routeId then
             return
         end
-        if rsel:isGateActive(name) then
-            io.write("Hradlo pro " .. name .. " je ještě aktivní na stavědle.\n")
+        if rsel:isGateActive(group) then
+            io.write("Hradlo pro " .. group .. " je ještě aktivní na stavědle.\n")
             return
         end
         network.send(map.network.peerAddress, map.network.port, "LOCK_REQUEST", {routeId = routeId, action = "release"})
         workspace:draw()
     end
 
-    rows[name] = row
+    rows[group] = row
 end
 
 --------------------------------------------------------------------------------
@@ -173,8 +185,8 @@ local function setLabelText(label, str)
     label.text = pad > 0 and (str .. string.rep(" ", pad)) or str
 end
 
-local function driveGateClonka(entranceName, active)
-    local entry = map.gates[entranceName]
+local function driveGateClonka(group, active)
+    local entry = map.gates[group]
     if not entry then
         return
     end
@@ -197,10 +209,10 @@ end
 
 local function onNetworkMessage(msgType, payload, senderAddress)
     if msgType == "GATE_STATE" then
-        rsel:onGateState(payload.entrance, payload.active)
-        driveGateClonka(payload.entrance, payload.active)
+        rsel:onGateState(payload.group, payload.active)
+        driveGateClonka(payload.group, payload.active)
         if not payload.active then
-            local row = rows[payload.entrance]
+            local row = rows[payload.group]
             if row then
                 setLabelText(row.stateLabel, "hradlo neaktivní")
             end
@@ -209,9 +221,9 @@ local function onNetworkMessage(msgType, payload, senderAddress)
         rsel:onLockState(payload.routeId, payload.state)
         driveLockClonka(payload.group, payload.state)
         if payload.state == "free" then
-            for name, id in pairs(rsel.activeRouteByEntrance) do
+            for group, id in pairs(rsel.activeRouteByGroup) do
                 if id == payload.routeId then
-                    rsel:clearActive(name)
+                    rsel:clearActive(group)
                 end
             end
         end
@@ -228,21 +240,29 @@ network.install(workspace, map.network.port, onNetworkMessage)
 
 --------------------------------------------------------------------------------
 
+local routesById = {}
+for _, r in ipairs(routesData.routes) do
+    routesById[r.id] = r
+end
+
 -- See stavedlo/init.lua's comment: grapes/GUI.lua's own loop uses OpenComputers' built-in
 -- "event" library internally, not grapes.Event, so the periodic tick has to be registered
 -- through event.timer to actually run.
 local event = require("event")
 event.timer(1, function()
-    for i, name in ipairs(mainSignalNames) do
-        local row = rows[name]
-        local pending = rsel:pendingRouteFor(name)
-        local active = rsel:activeRouteFor(name)
+    for _, group in ipairs(routesData.groups) do
+        local row = rows[group]
+        local pending = rsel:pendingRouteFor(group)
+        local active = rsel:activeRouteFor(group)
         if pending then
-            setLabelText(row.stateLabel, "vybráno: " .. pending)
+            local route = routesById[pending]
+            setLabelText(row.stateLabel, "vybráno: " .. (route and routeDisplayText(route) or pending))
             row.stateLabel.colors.text = YELLOW
         elseif active then
-            setLabelText(row.stateLabel, active .. " (" .. tostring(rsel.lockState[active] or "reserved") .. ")")
-            row.stateLabel.colors.text = rsel:isGateActive(name) and GREEN or GRAY
+            local route = routesById[active]
+            local displayText = route and routeDisplayText(route) or active
+            setLabelText(row.stateLabel, displayText .. " (" .. tostring(rsel.lockState[active] or "reserved") .. ")")
+            row.stateLabel.colors.text = rsel:isGateActive(group) and GREEN or GRAY
         else
             setLabelText(row.stateLabel, "-")
             row.stateLabel.colors.text = GRAY

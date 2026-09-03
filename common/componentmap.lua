@@ -46,11 +46,18 @@ function componentmap.empty()
                               --   and the matching departure over the exact same switches share one lever/one
                               --   routeLockId (see common/routes.lua's switchesKey), confirmed by the user against
                               --   a real station.
-        gates = {},          -- [entranceSignalName] = {
+        gates = {},          -- [runningLineLabel] = {
                              --   hradloController=addr, hradloClonkaName=str, hradloAspects={normal=n, active=n},
                              --   zarazkaController=addr, zarazkaClonkaName=str, zarazkaAspects={normal=n, active=n},
-                             --   detectorAddress=addr,
-                             -- }
+                             -- }  -- ONE per traťová kolej group (T1/T2/T4), shared between every arrival AND
+                             --    departure signal that can use that line -- confirmed by the user: real hradlo
+                             --    count matches switchlock's per-group count, not one per main signal (a
+                             --    departure signal can reach more than one line depending on the route). See
+                             --    `detectors` below for the per-signal physical detector mapping.
+        detectors = {},        -- [signalName] = detectorAddress  -- hradlová zarážka: each entrance/exit main
+                                --   signal has its OWN physical TileDigitalDetector (a train detector can only
+                                --   sense a train passing its own location) even though the clonka it feeds
+                                --   (via gate:groupForEntrace) is shared per group.
         network = {},          -- {peerAddress=addr, port=n}
     }
 end

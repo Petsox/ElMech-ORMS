@@ -117,16 +117,40 @@ for _, l in ipairs(config.Labels or {}) do
     workspace:addChild(GUI.text(l[1], l[2], WHITE, l[3]))
 end
 
--- Control panel: one row per hlavní návěstidlo, placed below the diagram.
+-- Control panel: one row per traťová kolej GROUP (not per signal -- a hradlo/závěr is shared
+-- between every arrival and departure signal on that line, confirmed by the user against the
+-- real hradlo count), placed below the diagram.
 local panelY = 40
-workspace:addChild(GUI.label(1, panelY, workspace.width, 1, WHITE, "Hlavní návěstidla"))
+workspace:addChild(GUI.label(1, panelY, workspace.width, 1, WHITE, "Návěstní hradla (traťové koleje)"))
+
+-- Display-only convenience: which arrival signal represents each group, so a departure route's
+-- state line can read "6 -> LMol" instead of the raw "S4 -> T4" -- reusing the arrival signal's
+-- already-familiar name as a stand-in for "that running line". Purely cosmetic, not used by any
+-- interlocking logic; the "S<track>" -> "<track>" stripping is a best-effort naming-convention
+-- guess (matches this station's own S<n> departure signal names), not something routes.lua
+-- relies on.
+local arrivalEntranceForGroup = {}
+for _, s in ipairs(config.Signals or {}) do
+    local mapped = map.signals[s[3]]
+    if mapped and mapped.kind == "main" and mapped.runningLine then
+        arrivalEntranceForGroup[mapped.runningLine] = s[3]
+    end
+end
+
+local function routeDisplayText(route)
+    if routesLib.isRunningLineLabel(route.label) then
+        local originTrack = route.entrance:match("^S(%d+)$") or route.entrance
+        local arrivalName = arrivalEntranceForGroup[route.label] or route.label
+        return originTrack .. " -> " .. arrivalName
+    end
+    return route.entrance .. " -> " .. route.label
+end
 
 local rows = {}
-for i, s in ipairs(mainSignals) do
-    local name = s[3]
+for i, group in ipairs(routesData.groups) do
     local y = panelY + i
     local row = {}
-    row.nameLabel = workspace:addChild(GUI.label(1, y, 10, 1, WHITE, name))
+    row.nameLabel = workspace:addChild(GUI.label(1, y, 10, 1, WHITE, group))
     row.stateLabel = workspace:addChild(GUI.label(12, y, 22, 1, GRAY, "-"))
     row.lockBtn = workspace:addChild(GUI.button(35, y, 8, 1, 0x333333, WHITE, 0x555555, WHITE, "Zámek"))
     row.stopBtn = workspace:addChild(GUI.button(44, y, 8, 1, 0x333333, WHITE, 0x555555, WHITE, "Stůj"))
@@ -134,7 +158,7 @@ for i, s in ipairs(mainSignals) do
     row.hradloOffBtn = workspace:addChild(GUI.button(62, y, 14, 1, 0x333333, WHITE, 0x555555, WHITE, "Hradlo pryč"))
 
     row.lockBtn.onTouch = function()
-        local routeId = gateCtl:routeIdFor(name)
+        local routeId = gateCtl:routeIdFor(group)
         if not routeId then
             return
         end
@@ -143,41 +167,47 @@ for i, s in ipairs(mainSignals) do
             network.send(map.network.peerAddress, map.network.port, "LOCK_STATE",
                 {routeId = routeId, state = lock:state(routeId), group = lock:groupFor(routeId)})
         else
-            io.write("Zámek " .. name .. ": " .. tostring(err) .. "\n")
+            io.write("Zámek " .. group .. ": " .. tostring(err) .. "\n")
         end
         workspace:draw()
     end
 
     row.stopBtn.onTouch = function()
-        sig:restore(name)
+        local entrance = gateCtl:entranceFor(group)
+        if entrance then
+            sig:restore(entrance)
+        end
         workspace:draw()
     end
 
     row.clearBtn.onTouch = function()
-        local routeId = gateCtl:routeIdFor(name)
-        if not routeId then
+        local routeId = gateCtl:routeIdFor(group)
+        local entrance = gateCtl:entranceFor(group)
+        if not routeId or not entrance then
             return
         end
-        local ok, err = sig:clear(name, routeId)
+        local ok, err = sig:clear(entrance, routeId)
         if not ok then
-            io.write("Návěst " .. name .. ": " .. tostring(err) .. "\n")
+            io.write("Návěst " .. entrance .. ": " .. tostring(err) .. "\n")
         end
         workspace:draw()
     end
 
     row.hradloOffBtn.onTouch = function()
-        local routeId = gateCtl:routeIdFor(name)
-        local ok, err = gateCtl:deactivate(name)
+        local entrance = gateCtl:entranceFor(group)
+        local ok, err = gateCtl:deactivate(group)
         if ok then
-            sig:restore(name)
-            network.send(map.network.peerAddress, map.network.port, "GATE_STATE", {entrance = name, active = false})
+            if entrance then
+                sig:restore(entrance)
+            end
+            network.send(map.network.peerAddress, map.network.port, "GATE_STATE", {group = group, active = false})
         else
-            io.write("Hradlo " .. name .. ": " .. tostring(err) .. "\n")
+            io.write("Hradlo " .. group .. ": " .. tostring(err) .. "\n")
         end
         workspace:draw()
     end
 
-    rows[name] = row
+    rows[group] = row
 end
 
 --------------------------------------------------------------------------------
@@ -186,24 +216,24 @@ end
 
 local function onNetworkMessage(msgType, payload, senderAddress)
     if msgType == "HRADLO_REQUEST" then
-        local ok, reason = gateCtl:activate(payload.entrance, payload.routeId)
-        network.send(senderAddress, map.network.port, "GATE_STATE", {entrance = payload.entrance, active = ok, reason = reason})
+        local ok, reason = gateCtl:activate(payload.routeId)
+        local route = lock.routesById[payload.routeId]
+        network.send(senderAddress, map.network.port, "GATE_STATE",
+            {group = route and route.group, routeId = payload.routeId, active = ok, reason = reason})
     elseif msgType == "LOCK_REQUEST" and payload.action == "release" then
         local route = lock.routesById[payload.routeId]
-        local entranceName = route and route.entrance
-        local gateInactive = entranceName == nil or not gateCtl:isActive(entranceName)
-        local group = lock:groupFor(payload.routeId)
+        local routeGroup = route and route.group
+        local gateInactive = routeGroup == nil or not gateCtl:isActive(routeGroup)
+        local lockGroup = lock:groupFor(payload.routeId)
         local ok, reason = lock:release(payload.routeId, gateInactive)
         network.send(senderAddress, map.network.port, "LOCK_STATE",
-            {routeId = payload.routeId, state = lock:state(payload.routeId), group = group, ok = ok, reason = reason})
+            {routeId = payload.routeId, state = lock:state(payload.routeId), group = lockGroup, ok = ok, reason = reason})
     end
 end
 
 local detectorByAddress = {}
-for name, entry in pairs(map.gates) do
-    if entry.detectorAddress then
-        detectorByAddress[entry.detectorAddress] = name
-    end
+for name, addr in pairs(map.detectors) do
+    detectorByAddress[addr] = name
 end
 
 local function onDetect(senderAddress)
@@ -289,20 +319,31 @@ local function refreshDiagram()
         end
     end
 
+    -- Default every main signal glyph back to its idle colour first, then colour in whichever
+    -- one is actually the active entrance for each group's row -- a group's hradlo can be "used"
+    -- by a different signal each time (any departure signal reaching that line), so this can't
+    -- be a fixed per-signal lookup the way it used to be.
     for _, s in ipairs(mainSignals) do
-        local name = s[3]
-        local row = rows[name]
-        local routeId = gateCtl:routeIdFor(name)
+        signalObjects[s[3]].color = BLUE
+    end
+
+    for _, group in ipairs(routesData.groups) do
+        local row = rows[group]
+        local routeId = gateCtl:routeIdFor(group)
         local state = lock:state(routeId or "")
         local label = "-"
         local color = GRAY
         if routeId then
-            label = routeId .. " (" .. state .. ")"
+            local route = lock.routesById[routeId]
+            label = routeDisplayText(route) .. " (" .. state .. ")"
             color = state == "locked" and GREEN or YELLOW
+            local entrance = gateCtl:entranceFor(group)
+            if entrance and signalObjects[entrance] then
+                signalObjects[entrance].color = color
+            end
         end
         setLabelText(row.stateLabel, label)
         row.stateLabel.colors.text = color
-        signalObjects[name].color = color
     end
 end
 

@@ -480,49 +480,72 @@ local function setupRouteLocks(routesData, map)
     end
 end
 
-local function setupGates(config, map)
-    cli.header("Návěstní hradlo + hradlová zarážka (jen pro hlavní návěstidla)")
+-- One hradlo + hradlová zarážka clonka pair per traťová kolej group (shared between every
+-- arrival and departure signal that can use that line -- confirmed by the user against the real
+-- hradlo count), matching setupGroupLocks' pattern.
+local function setupGateClonky(routesData, map)
+    cli.header("Návěstní hradlo + hradlová zarážka -- " .. #routesData.groups .. " skupina/y (podle traťových kolejí)")
+    for _, group in ipairs(routesData.groups) do
+        io.write("\n--- Hradlo pro " .. group .. " ---\n")
+        if map.gates[group] and not cli.confirm("Už namapováno, přemapovat?", false) then
+            goto continue
+        end
+
+        while true do
+            local hradloClonkaName = cli.prompt("Jméno clonky hradla (Distant Signal) pro " .. group)
+            local hradloController = autoOrPickComponent(
+                componentmap.TYPES.controllerBox, "getSignalNames", hradloClonkaName,
+                "Digital Controller Box pro clonku hradla " .. group, "clonka"
+            )
+            local hradloNormal = pickAspect(hradloController, "červená / normální", "red")
+            local hradloActive = pickAspect(hradloController, "bílá / aktivní", "white")
+
+            local zarazkaClonkaName = cli.prompt("Jméno clonky hradlové zarážky (Distant Signal) pro " .. group)
+            local zarazkaController = autoOrPickComponent(
+                componentmap.TYPES.controllerBox, "getSignalNames", zarazkaClonkaName,
+                "Digital Controller Box pro clonku hradlové zarážky " .. group, "clonka"
+            )
+            local zarazkaNormal = pickAspect(zarazkaController, "černá / normální", "black")
+            local zarazkaActive = pickAspect(zarazkaController, "bílá / aktivní", "white")
+
+            local choice = cli.reviewChoice({
+                "Hradlo " .. group .. ":",
+                "  hradlo clonka: '" .. tostring(hradloClonkaName) .. "' na " .. tostring(hradloController),
+                "  zarážka clonka: '" .. tostring(zarazkaClonkaName) .. "' na " .. tostring(zarazkaController),
+            })
+            if choice == "save" then
+                map.gates[group] = {
+                    hradloController = hradloController, hradloClonkaName = hradloClonkaName,
+                    hradloAspects = {normal = hradloNormal, active = hradloActive},
+                    zarazkaController = zarazkaController, zarazkaClonkaName = zarazkaClonkaName,
+                    zarazkaAspects = {normal = zarazkaNormal, active = zarazkaActive},
+                }
+                break
+            elseif choice == "skip" then
+                break
+            end
+        end
+        ::continue::
+    end
+end
+
+-- Each main signal's own physical Digital Detector for hradlová zarážka -- per-signal even
+-- though the clonka it feeds is shared per group (see componentmap.lua's schema comment: a
+-- train detector can only sense a train passing its own physical location).
+local function setupDetectors(config, map)
+    cli.header("Digital Detektory (hradlová zarážka -- jeden na návěstidlo)")
     for _, sig in ipairs(config.Signals or {}) do
         local name = sig[3]
         if map.signals[name] and map.signals[name].kind == "main" then
-            io.write("\n--- Hradlo pro " .. name .. " ---\n")
-            if map.gates[name] and not cli.confirm("Už namapováno, přemapovat?", false) then
+            io.write("\n--- Detektor pro " .. name .. " ---\n")
+            if map.detectors[name] and not cli.confirm("Už namapováno, přemapovat?", false) then
                 goto continue
             end
-
             while true do
-                local hradloClonkaName = cli.prompt("Jméno clonky hradla (Distant Signal)")
-                local hradloController = autoOrPickComponent(
-                    componentmap.TYPES.controllerBox, "getSignalNames", hradloClonkaName,
-                    "Digital Controller Box pro clonku hradla " .. name, "clonka"
-                )
-                local hradloNormal = pickAspect(hradloController, "červená / normální", "red")
-                local hradloActive = pickAspect(hradloController, "bílá / aktivní", "white")
-
-                local zarazkaClonkaName = cli.prompt("Jméno clonky hradlové zarážky (Distant Signal)")
-                local zarazkaController = autoOrPickComponent(
-                    componentmap.TYPES.controllerBox, "getSignalNames", zarazkaClonkaName,
-                    "Digital Controller Box pro clonku hradlové zarážky " .. name, "clonka"
-                )
-                local zarazkaNormal = pickAspect(zarazkaController, "černá / normální", "black")
-                local zarazkaActive = pickAspect(zarazkaController, "bílá / aktivní", "white")
-
                 local detectorAddress = pickComponent(componentmap.TYPES.detector, "Digital Detector pro hradlovou zarážku " .. name)
-
-                local choice = cli.reviewChoice({
-                    "Hradlo " .. name .. ":",
-                    "  hradlo clonka: '" .. tostring(hradloClonkaName) .. "' na " .. tostring(hradloController),
-                    "  zarážka clonka: '" .. tostring(zarazkaClonkaName) .. "' na " .. tostring(zarazkaController),
-                    "  detektor: " .. tostring(detectorAddress),
-                })
+                local choice = cli.reviewChoice({"Detektor " .. name .. ": " .. tostring(detectorAddress)})
                 if choice == "save" then
-                    map.gates[name] = {
-                        hradloController = hradloController, hradloClonkaName = hradloClonkaName,
-                        hradloAspects = {normal = hradloNormal, active = hradloActive},
-                        zarazkaController = zarazkaController, zarazkaClonkaName = zarazkaClonkaName,
-                        zarazkaAspects = {normal = zarazkaNormal, active = zarazkaActive},
-                        detectorAddress = detectorAddress,
-                    }
+                    map.detectors[name] = detectorAddress
                     break
                 elseif choice == "skip" then
                     break
@@ -586,7 +609,9 @@ local function main()
     save(map)
     setupRouteLocks(routesData, map)
     save(map)
-    setupGates(config, map)
+    setupGateClonky(routesData, map)
+    save(map)
+    setupDetectors(config, map)
     save(map)
     setupNetwork(map)
     save(map)

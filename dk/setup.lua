@@ -131,43 +131,41 @@ local function setupRunningLines(config, map)
     end
 end
 
+-- One hradlo clonka per traťová kolej group (shared between every arrival and departure signal
+-- on that line, confirmed by the user against the real hradlo count -- must match stavedlo's
+-- setupGateClonky's grouping), not per entrance signal like an earlier version of this wizard.
 local function setupGateClonky(routesData, map)
-    cli.header("Clonky návěstního hradla (jen ty viditelné v DK)")
-    local seen = {}
-    for _, r in ipairs(routesData.routes) do
-        if not seen[r.entrance] then
-            seen[r.entrance] = true
-            local entranceName = r.entrance
-            io.write("\n--- Hradlo pro " .. entranceName .. " ---\n")
-            if map.gates[entranceName] and not cli.confirm("Už namapováno, přemapovat?", false) then
-                goto continue
-            end
-            -- Retry loop: a typo or wrong pick just now can be corrected immediately (choice
-            -- "retry") without restarting the whole wizard -- see cli.reviewChoice's doc comment.
-            while true do
-                local clonkaName = cli.prompt("Jméno clonky hradla (Distant Signal) v DK")
-                local controller = autoOrPickComponent(
-                    componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
-                    "Digital Controller Box pro clonku hradla " .. entranceName
-                )
-                local normal = pickAspect(controller, "červená / normální", "red")
-                local active = pickAspect(controller, "bílá / aktivní", "white")
-
-                local choice = cli.reviewChoice({
-                    "Hradlo " .. entranceName .. ": clonka='" .. tostring(clonkaName) .. "', controller=" .. tostring(controller),
-                })
-                if choice == "save" then
-                    map.gates[entranceName] = {
-                        hradloController = controller, hradloClonkaName = clonkaName,
-                        hradloAspects = {normal = normal, active = active},
-                    }
-                    break
-                elseif choice == "skip" then
-                    break
-                end
-            end
-            ::continue::
+    cli.header("Clonky návěstního hradla v DK -- " .. #routesData.groups .. " skupina/y")
+    for _, group in ipairs(routesData.groups) do
+        io.write("\n--- Hradlo pro " .. group .. " ---\n")
+        if map.gates[group] and not cli.confirm("Už namapováno, přemapovat?", false) then
+            goto continue
         end
+        -- Retry loop: a typo or wrong pick just now can be corrected immediately (choice
+        -- "retry") without restarting the whole wizard -- see cli.reviewChoice's doc comment.
+        while true do
+            local clonkaName = cli.prompt("Jméno clonky hradla (Distant Signal) v DK pro " .. group)
+            local controller = autoOrPickComponent(
+                componentmap.TYPES.controllerBox, "getSignalNames", clonkaName,
+                "Digital Controller Box pro clonku hradla " .. group
+            )
+            local normal = pickAspect(controller, "červená / normální", "red")
+            local active = pickAspect(controller, "bílá / aktivní", "white")
+
+            local choice = cli.reviewChoice({
+                "Hradlo " .. group .. ": clonka='" .. tostring(clonkaName) .. "', controller=" .. tostring(controller),
+            })
+            if choice == "save" then
+                map.gates[group] = {
+                    hradloController = controller, hradloClonkaName = clonkaName,
+                    hradloAspects = {normal = normal, active = active},
+                }
+                break
+            elseif choice == "skip" then
+                break
+            end
+        end
+        ::continue::
     end
 end
 
