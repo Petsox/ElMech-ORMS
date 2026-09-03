@@ -152,21 +152,22 @@ end
 
 -- Signalista's "uzamčení závěru výměn" button. Requires: the route to already be reserved
 -- (hradlo active), its kolejový závěrník lever to be engaged (mechanically confirms this
--- specific route, not just "some route on this line"), and every switch it uses to physically
--- sit in the position the route needs.
+-- specific physical switch path, not just "some route on this line" -- shared with the matching
+-- arrival/departure route over the same switches, see common/routes.lua's switchesKey), and
+-- every switch it uses to physically sit in the position the route needs.
 function switchlock:confirmLock(routeId)
     local slot = self.slots[routeId]
     if not slot or slot.state ~= "reserved" then
         return false, "not_reserved"
     end
 
-    local routeLockEntry = self.map.routeLocks[routeId]
+    local route = self.routesById[routeId]
+    local routeLockEntry = self.map.routeLocks[route.routeLockId or routeId]
     local engaged = routeLockEntry and switchio.readLever(routeLockEntry)
     if not engaged then
         return false, "route_lock_not_engaged"
     end
 
-    local route = self.routesById[routeId]
     local ok, badSwitch = leverMatchesRoute(self, route)
     if not ok then
         return false, "switch_mismatch:" .. tostring(badSwitch)

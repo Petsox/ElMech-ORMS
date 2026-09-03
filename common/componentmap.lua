@@ -39,9 +39,13 @@ function componentmap.empty()
         crossings = {},    -- [crossingName] = {controller=addr}
         switchlock = {},    -- [runningLineLabel] = {controller=addr, clonkaName=str, aspects={normal=n, locked=n}}
                             --   one entry per routes.json group (e.g. "T1"/"T2"/"T4"), not per route.
-        routeLocks = {},      -- [routeId] = {redstoneIO=addr, side=str, color=str}  -- kolejový závěrník: a
+        routeLocks = {},      -- [routeLockId] = {redstoneIO=addr, side=str, color=str}  -- kolejový závěrník: a
                               --   Control Panel lever (input only, no motor/indicator) that must be engaged before
-                              --   switchlock:confirmLock will lock that specific route's závěr výměn.
+                              --   switchlock:confirmLock will lock that route's závěr výměn. Keyed by routeLockId
+                              --   (routes.json's routeLockGroups/route.routeLockId), NOT raw routeId -- an arrival
+                              --   and the matching departure over the exact same switches share one lever/one
+                              --   routeLockId (see common/routes.lua's switchesKey), confirmed by the user against
+                              --   a real station.
         gates = {},          -- [entranceSignalName] = {
                              --   hradloController=addr, hradloClonkaName=str, hradloAspects={normal=n, active=n},
                              --   zarazkaController=addr, zarazkaClonkaName=str, zarazkaAspects={normal=n, active=n},

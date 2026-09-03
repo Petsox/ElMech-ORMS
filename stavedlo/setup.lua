@@ -442,28 +442,35 @@ local function setupGroupLocks(routesData, map)
     end
 end
 
--- Kolejový závěrník: a real mechanical route-lock lever per route (not per group) -- signalista
--- must engage it (after setting the switches) before switchlock:confirmLock will lock the
--- závěr výměn for that specific route. Input-only, reuses hw/switchio.lua's generic bundled-cable
--- lever reading (no motor/indicator needed here, unlike a switch).
+-- Kolejový závěrník: a real mechanical route-lock lever -- signalista must engage it (after
+-- setting the switches) before switchlock:confirmLock will lock the závěr výměn for whichever
+-- route is currently reserved on it. One lever per PHYSICAL SWITCH PATH (routesData.routeLockGroups,
+-- keyed by routeLockId -- see common/routes.lua's switchesKey), not one per route: an arrival and
+-- the matching departure over the exact same switches share one lever, confirmed by the user
+-- against a real station, since throwing it locks the same switches regardless of travel
+-- direction. Input-only, reuses hw/switchio.lua's generic bundled-cable lever reading (no
+-- motor/indicator needed here, unlike a switch).
 local function setupRouteLocks(routesData, map)
-    cli.header("Kolejové závěrníky (páčka na Control Panelu pro každou vlakovou cestu)")
-    for _, r in ipairs(routesData.routes) do
-        io.write("\n--- Kolejový závěrník pro cestu " .. r.id .. " (skupina " .. tostring(r.group) .. ") ---\n")
-        if map.routeLocks[r.id] and not cli.confirm("Už namapováno, přemapovat?", false) then
+    cli.header("Kolejové závěrníky (páčka na Control Panelu, sdílená mezi vjezdem a odjezdem po stejné cestě)")
+    for lockId, routeIds in pairs(routesData.routeLockGroups) do
+        io.write("\n--- Kolejový závěrník " .. lockId .. " ---\nPoužívají cesty:\n")
+        for _, rid in ipairs(routeIds) do
+            io.write("  - " .. rid .. "\n")
+        end
+        if map.routeLocks[lockId] and not cli.confirm("Už namapováno, přemapovat?", false) then
             goto continue
         end
         while true do
-            local rioAddress, side, color = promptLever(map, "Redstone I/O pro páčku kolejového závěrníku", "lever", nil, r.id)
+            local rioAddress, side, color = promptLever(map, "Redstone I/O pro páčku kolejového závěrníku " .. lockId, "lever", nil, lockId)
             if not rioAddress then
-                io.write("Přeskočeno -- cesta zůstane bez kolejového závěrníku (nepůjde zamknout závěr výměn).\n")
+                io.write("Přeskočeno -- cesty zůstanou bez kolejového závěrníku (nepůjde zamknout závěr výměn).\n")
                 break
             end
             local choice = cli.reviewChoice({
-                "Kolejový závěrník " .. r.id .. ": " .. rioAddress .. " / " .. side .. " / " .. color,
+                "Kolejový závěrník " .. lockId .. ": " .. rioAddress .. " / " .. side .. " / " .. color,
             })
             if choice == "save" then
-                map.routeLocks[r.id] = {redstoneIO = rioAddress, side = side, color = color}
+                map.routeLocks[lockId] = {redstoneIO = rioAddress, side = side, color = color}
                 break
             elseif choice == "skip" then
                 break

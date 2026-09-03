@@ -106,6 +106,27 @@ end
 -- routes does NOT satisfy this).
 routes.isRunningLineLabel = isRunningLineLabel
 
+-- Canonical identity of the physical switch positions a route needs -- an arrival route (e.g.
+-- LMol -> 4) and the matching departure route (S4 -> T4) start and end at different points
+-- (signal cells differ from label cells), so their full cell paths never match, but if they run
+-- over the exact same switches in the exact same required positions they ARE mechanically the
+-- same path through the interlocking, and should share one kolejový závěrník lever rather than
+-- each getting its own -- confirmed by the user against a real station. Empty (no switches used
+-- at all) deliberately does not merge -- there's nothing there to prove two such routes are
+-- actually the same path, so each stays on its own lock rather than risk conflating unrelated
+-- switch-free routes.
+local function switchesKey(switches)
+    local parts = {}
+    for name, icon in pairs(switches) do
+        parts[#parts + 1] = name .. "=" .. icon
+    end
+    if #parts == 0 then
+        return nil
+    end
+    table.sort(parts)
+    return table.concat(parts, "|")
+end
+
 -- Computes routes + running-line groups for a zhlaví and persists the result so stavedlo/dk can
 -- load it at boot without recomputing. mainSignalNames: every confirmed hlavní signal (both
 -- arrival and departure alike). entranceRunningLine = {[entranceName] = runningLineLabel}: only
@@ -118,6 +139,8 @@ function routes.computeAndSave(config, mainSignalNames, entranceRunningLine, pat
     local routeList = routes.enumerate(graph, mainSignalNames, config.Labels or {})
 
     local groupSet, groups = {}, {}
+    local lockIdByKey = {}
+    local routesByLockId = {}
     local saved = {switchIcons = switchIconTable(config), routes = {}}
     for _, r in ipairs(routeList) do
         local group = isRunningLineLabel(r.label) and r.label or entranceRunningLine[r.entrance]
@@ -126,8 +149,23 @@ function routes.computeAndSave(config, mainSignalNames, entranceRunningLine, pat
                 groupSet[group] = true
                 groups[#groups + 1] = group
             end
+
+            local sk = switchesKey(r.switches)
+            local lockId
+            if sk then
+                lockId = lockIdByKey[sk]
+                if not lockId then
+                    lockId = r.id
+                    lockIdByKey[sk] = lockId
+                end
+            else
+                lockId = r.id
+            end
+            routesByLockId[lockId] = routesByLockId[lockId] or {}
+            table.insert(routesByLockId[lockId], r.id)
+
             saved.routes[#saved.routes + 1] = {
-                id = r.id, entrance = r.entrance, label = r.label, group = group,
+                id = r.id, entrance = r.entrance, label = r.label, group = group, routeLockId = lockId,
                 cells = r.cells, switches = r.switches, crossings = r.crossings, allStraight = r.allStraight,
             }
         end
@@ -135,6 +173,11 @@ function routes.computeAndSave(config, mainSignalNames, entranceRunningLine, pat
     table.sort(groups)
     saved.groups = groups
     saved.lockCount = #groups
+    -- [routeLockId] = {routeId, ...} -- which routes share this lever. Named distinctly from
+    -- componentmap.json's map.routeLocks (the actual hardware mapping, also keyed by
+    -- routeLockId) -- this is routes.json's own record of the grouping, for the wizard to show
+    -- "which routes share this lever" without recomputing switchesKey itself.
+    saved.routeLockGroups = routesByLockId
 
     local ok, err = persist.writeJSON(path, saved)
     if not ok then
