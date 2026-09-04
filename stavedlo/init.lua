@@ -229,16 +229,12 @@ local function onNetworkMessage(msgType, payload, senderAddress)
         network.send(senderAddress, map.network.port, "LOCK_STATE",
             {routeId = payload.routeId, state = lock:state(payload.routeId), group = lockGroup, ok = ok, reason = reason})
     elseif msgType == "GATE_EMERGENCY_RELEASE" then
-        local entrance = gateCtl:entranceFor(payload.group)
-        local ok, reason = gateCtl:emergencyDeactivate(payload.group)
+        local ok, reason = gateCtl:emergencyTriggerZarazka(payload.group)
         if ok then
-            io.write("POZOR: Hradlo " .. tostring(payload.group) .. " nouzově vybaveno z DK (bez potvrzení hradlovou zarážkou).\n")
-            if entrance then
-                sig:restore(entrance)
-            end
+            io.write("POZOR: Hradlová zarážka " .. tostring(payload.group) .. " nouzově aktivována z DK -- 'Hradlo pryč' teď půjde stisknout.\n")
+        else
+            io.write("Nouzové vybavení hradlové zarážky " .. tostring(payload.group) .. " se nezdařilo: " .. tostring(reason) .. "\n")
         end
-        network.send(senderAddress, map.network.port, "GATE_STATE",
-            {group = payload.group, active = gateCtl:isActive(payload.group), reason = reason})
     end
 end
 
