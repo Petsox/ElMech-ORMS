@@ -144,6 +144,11 @@ for i, group in ipairs(routesData.groups) do
     row.stateLabel = workspace:addChild(GUI.label(12, y, 30, 1, GRAY, "-"))
     row.hradloBtn = workspace:addChild(GUI.button(44, y, 16, 1, 0x333333, WHITE, 0x555555, WHITE, "Aktivovat hradlo"))
     row.releaseBtn = workspace:addChild(GUI.button(61, y, 16, 1, 0x333333, WHITE, 0x555555, WHITE, "Uvolnit závěr"))
+    -- Nouzové vybavení: bypasses gate.lua's normal requirement that the hradlová zarážka detector
+    -- has fired -- for when it never does (a missed/failed detector trigger) and the normal
+    -- release path would otherwise be stuck forever. Deliberately styled apart from the other
+    -- (neutral grey) buttons since it's a safety-check override, not a routine action.
+    row.emergencyBtn = workspace:addChild(GUI.button(79, y, 19, 1, 0x662222, WHITE, 0x993333, WHITE, "Nouzové vybavení"))
 
     row.hradloBtn.onTouch = function()
         local routeId = rsel:pendingRouteFor(group)
@@ -167,6 +172,16 @@ for i, group in ipairs(routesData.groups) do
             return
         end
         network.send(map.network.peerAddress, map.network.port, "LOCK_REQUEST", {routeId = routeId, action = "release"})
+        workspace:draw()
+    end
+
+    row.emergencyBtn.onTouch = function()
+        if not rsel:isGateActive(group) then
+            io.write("Hradlo pro " .. group .. " není aktivní, není co nouzově vybavit.\n")
+            return
+        end
+        io.write("POZOR: Odesílám nouzové vybavení hradla pro " .. group .. " (bez potvrzení hradlovou zarážkou).\n")
+        network.send(map.network.peerAddress, map.network.port, "GATE_EMERGENCY_RELEASE", {group = group})
         workspace:draw()
     end
 

@@ -228,6 +228,17 @@ local function onNetworkMessage(msgType, payload, senderAddress)
         local ok, reason = lock:release(payload.routeId, gateInactive)
         network.send(senderAddress, map.network.port, "LOCK_STATE",
             {routeId = payload.routeId, state = lock:state(payload.routeId), group = lockGroup, ok = ok, reason = reason})
+    elseif msgType == "GATE_EMERGENCY_RELEASE" then
+        local entrance = gateCtl:entranceFor(payload.group)
+        local ok, reason = gateCtl:emergencyDeactivate(payload.group)
+        if ok then
+            io.write("POZOR: Hradlo " .. tostring(payload.group) .. " nouzově vybaveno z DK (bez potvrzení hradlovou zarážkou).\n")
+            if entrance then
+                sig:restore(entrance)
+            end
+        end
+        network.send(senderAddress, map.network.port, "GATE_STATE",
+            {group = payload.group, active = gateCtl:isActive(payload.group), reason = reason})
     end
 end
 

@@ -135,6 +135,25 @@ function gate:deactivate(group)
     return true
 end
 
+-- Nouzové vybavení (emergency release): DK's override for when the hradlová zarážka detector
+-- never fires -- a real train that failed to trip the (Minecraft) detector, or a genuine need to
+-- abort, would otherwise leave deactivate() permanently stuck on "zarazka_not_triggered" with no
+-- way to ever free the group's lock again. Matches real electromechanical practice, where the
+-- výpravčí (dispatcher, DK) holds emergency-release authority for exactly this failure case --
+-- bypasses the zarážka proof specifically, not any other precondition (the hradlo must still
+-- actually be active).
+function gate:emergencyDeactivate(group)
+    local st = self.active[group]
+    if not st then
+        return false, "not_active"
+    end
+
+    self.active[group] = nil
+    driveClonka(self.map.gates[group], "normal")
+    driveZarazka(self.map.gates[group], "normal")
+    return true
+end
+
 function gate:reset()
     for _, entry in pairs(self.map.gates) do
         driveClonka(entry, "normal")
